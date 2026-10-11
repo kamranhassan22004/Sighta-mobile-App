@@ -1,76 +1,191 @@
+
+const crypto = require("crypto");
 const Device = require("../models/Device");
 const User = require("../models/User");
 
-// @route  POST /api/device/register
-// @desc   Register a SIGHTA glasses device and link it to the logged-in guardian
-// @access Private
+// Generate a secure key for Raspberry Pi
+const generateDeviceKey = () => {
+  const deviceKey = crypto.randomBytes(32).toString("hex");
+
+  const apiKeyHash = crypto
+    .createHash("sha256")
+    .update(deviceKey)
+    .digest("hex");
+
+  return { deviceKey, apiKeyHash };
+};
+
+// Register SIGHTA glasses with guardian account
 const registerDevice = async (req, res) => {
   try {
     const { deviceId, firmwareVersion } = req.body;
 
-    if (!deviceId) {
-      return res.status(400).json({ message: "deviceId is required" });
+    if (
+      typeof deviceId !== "string" ||
+      !/^[a-zA-Z0-9_-]{3,64}$/.test(deviceId)
+    ) {
+      return res.status(400).json({
+        message: "Valid deviceId is required (3-64 characters)",
+      });
     }
 
     const existing = await Device.findOne({ deviceId });
+
     if (existing) {
-      return res.status(409).json({ message: "This device is already registered" });
+      return res.status(409).json({
+        message: "Device already registered. Use rotate-key if you own it.",
+      });
     }
+
+    const { deviceKey, apiKeyHash } = generateDeviceKey();
 
     const device = await Device.create({
       deviceId,
       owner: req.user._id,
       firmwareVersion: firmwareVersion || "1.0.0",
+      apiKeyHash,
     });
 
-    await User.findByIdAndUpdate(req.user._id, { device: device._id });
+    await User.findByIdAndUpdate(req.user._id, {
+      device: device._id,
+    });
 
-    return res.status(201).json(device);
+    const result = device.toObject();
+    delete result.apiKeyHash;
+
+    return res.status(201).json({
+      ...result,
+      deviceKey,
+    });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
-  }
-};
-
-// @route  GET /api/device/status/:deviceId
-// @desc   Get current status of a device
-// @access Private
-const getDeviceStatus = async (req, res) => {
-  try {
-    const device = await Device.findOne({ deviceId: req.params.deviceId });
-
-    if (!device) {
-      return res.status(404).json({ message: "Device not found" });
+    if (error.code === 11000) {
+      return res.status(409).json({
+        message: "Device already registered",
+      });
     }
 
-    return res.json(device);
-  } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return res.status(500).json({
+      message: error.message,
+    });
   }
 };
 
-// @route  PUT /api/device/update/:deviceId
-// @desc   Update device status/battery/connectivity (called by device pipeline)
-// @access Private
+// Generate a new key for an already registered device
+const rotateDeviceKey = async (req, res) => {
+  try {
+    const device = await Device.findOne({
+      deviceId: req.params.deviceId,
+      owner: req.user._id,
+    });
+
+    if (!device) {
+      return res.status(404).json({
+        message: "Device not found for this guardian",
+      });
+    }
+
+    const { deviceKey, apiKeyHash } = generateDeviceKey();
+
+    device.apiKeyHash = apiKeyHash;
+    await device.save();
+
+    return res.json({
+      deviceId: device.deviceId,
+      deviceKey,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: error.message,
+    });
+  }
+};
+
+// Get device status
+const getDeviceStatus = async (req, res) => {
+  try {
+    const device = await Device.findOne({
+      deviceId: req.params.deviceId,
+      owner: req.user._id,
+    });
+
+    if (!device) {
+      return res.status(404).json({
+        message: "Device not found",
+      });
+    }
+
+    const result = device.toObject();
+
+    // Mark device offline if no update for 15 seconds
+    if (
+      result.status === "online" &&
+      (!result.lastSyncedAt ||
+        Date.now() - new Date(result.lastSyncedAt).getTime() > 15000)
+    ) {
+      result.status = "offline";
+    }
+
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      message: error.message,
+    });
+  }
+};
+
+// Update device details from guardian account
 const updateDevice = async (req, res) => {
   try {
-    const { status, batteryPercentage, connectivity, firmwareVersion } = req.body;
+    const {
+      status,
+      batteryPercentage,
+      connectivity,
+      firmwareVersion,
+    } = req.body;
 
-    const device = await Device.findOne({ deviceId: req.params.deviceId });
+    const device = await Device.findOne({
+      deviceId: req.params.deviceId,
+      owner: req.user._id,
+    });
+
     if (!device) {
-      return res.status(404).json({ message: "Device not found" });
+      return res.status(404).json({
+        message: "Device not found",
+      });
     }
 
     if (status) device.status = status;
-    if (batteryPercentage !== undefined) device.batteryPercentage = batteryPercentage;
-    if (connectivity) device.connectivity = { ...device.connectivity.toObject(), ...connectivity };
-    if (firmwareVersion) device.firmwareVersion = firmwareVersion;
+
+    if (batteryPercentage !== undefined) {
+      device.batteryPercentage = batteryPercentage;
+    }
+
+    if (connectivity) {
+      device.connectivity = {
+        ...device.connectivity.toObject(),
+        ...connectivity,
+      };
+    }
+
+    if (firmwareVersion) {
+      device.firmwareVersion = firmwareVersion;
+    }
+
     device.lastSyncedAt = new Date();
 
     const updated = await device.save();
+
     return res.json(updated);
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return res.status(500).json({
+      message: error.message,
+    });
   }
 };
 
-module.exports = { registerDevice, getDeviceStatus, updateDevice };
+module.exports = {
+  registerDevice,
+  rotateDeviceKey,
+  getDeviceStatus,
+  updateDevice,
+};
