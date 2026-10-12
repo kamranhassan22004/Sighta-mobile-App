@@ -1,5 +1,6 @@
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
+
 import {
   View,
   Text,
@@ -12,10 +13,13 @@ import {
 } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
+
 import { useAuth } from "../context/AuthContext";
 import { updateProfile } from "../services/authService";
 
 import Header from "../components/Header";
+
 import {
   colors,
   spacing,
@@ -25,15 +29,7 @@ import {
 
 export default function ProfileScreen({ navigation }) {
   const { user, logout, refreshProfile } = useAuth();
-  // Device linked hona aur device online hona alag cheezein hain.
-  const isDeviceLinked = Boolean(user?.device);
 
-  // Agar device linked hai lekin SIGHTA user ka naam
-  // database mein nahi hai, toh misleading "Not linked yet"
-  // nahi dikhayenge.
-  const sightaUserName = isDeviceLinked
-    ? user?.dependent?.name?.trim() || "SIGHTA User"
-    : "Not linked yet";
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -43,6 +39,53 @@ export default function ProfileScreen({ navigation }) {
     user?.dependent?.relationship || ""
   );
 
+  // A device is linked when the account has a device
+  // reference in its backend profile.
+  // Device online/offline is a separate status.
+  const isDeviceLinked = Boolean(
+  user?.device &&
+    (typeof user.device !== "object" ||
+      user.device._id ||
+      user.device.id ||
+      user.device.deviceId)
+);
+
+  // Missing dependent name does not mean device is unlinked.
+  const sightaUserName = isDeviceLinked
+    ? user?.dependent?.name?.trim() || "SIGHTA User"
+    : "Not linked yet";
+
+  // Fetch the latest account information whenever
+  // the Profile screen becomes active.
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      const loadProfile = async () => {
+        try {
+          await refreshProfile();
+        } catch (error) {
+          if (active) {
+            console.log(
+              "PROFILE REFRESH ERROR:",
+              error?.response?.data?.message ||
+                error?.message ||
+                error
+            );
+          }
+        }
+      };
+
+      loadProfile();
+
+      return () => {
+        active = false;
+      };
+    }, [refreshProfile])
+  );
+
+  // Sync form values when profile changes,
+  // but do not overwrite fields during editing.
   useEffect(() => {
     if (!isEditing) {
       setName(user?.name || "");
@@ -64,6 +107,7 @@ export default function ProfileScreen({ navigation }) {
     setRelationship(
       user?.dependent?.relationship || ""
     );
+
     setIsEditing(true);
   };
 
@@ -73,6 +117,7 @@ export default function ProfileScreen({ navigation }) {
     setRelationship(
       user?.dependent?.relationship || ""
     );
+
     setIsEditing(false);
   };
 
@@ -122,14 +167,14 @@ export default function ProfileScreen({ navigation }) {
       console.log(
         "PROFILE UPDATE ERROR:",
         error?.response?.data?.message ||
-        error?.message ||
-        error
+          error?.message ||
+          error
       );
 
       Alert.alert(
         "Update Failed",
         error?.response?.data?.message ||
-        "Unable to update profile. Please try again."
+          "Unable to update profile. Please try again."
       );
     } finally {
       setSaving(false);
@@ -347,7 +392,7 @@ export default function ProfileScreen({ navigation }) {
             </>
           )}
         </Section>
-        
+
         {/* My SIGHTA User */}
         <Section title="My SIGHTA User">
           <View style={styles.dependentCard}>
@@ -359,12 +404,7 @@ export default function ProfileScreen({ navigation }) {
               />
             </View>
 
-            <View
-              style={{
-                flex: 1,
-                marginLeft: spacing.sm,
-              }}
-            >
+            <View style={styles.dependentInfo}>
               <Text style={styles.dependentName}>
                 {sightaUserName}
               </Text>
@@ -376,9 +416,23 @@ export default function ProfileScreen({ navigation }) {
               </Text>
             </View>
 
-            <View style={styles.connectedBadge}>
-              <Text style={styles.connectedBadgeText}>
-                {isDeviceLinked ? "Linked" : "Not linked"}
+            <View
+              style={[
+                styles.connectedBadge,
+                !isDeviceLinked &&
+                  styles.notConnectedBadge,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.connectedBadgeText,
+                  !isDeviceLinked &&
+                    styles.notConnectedBadgeText,
+                ]}
+              >
+                {isDeviceLinked
+                  ? "Linked"
+                  : "Not Linked"}
               </Text>
             </View>
           </View>
@@ -453,6 +507,7 @@ function InfoRow({ icon, label, value }) {
         <Text style={styles.infoLabel}>
           {label}
         </Text>
+
         <Text style={styles.infoValue}>
           {value}
         </Text>
@@ -676,6 +731,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
+  dependentInfo: {
+    flex: 1,
+    marginLeft: spacing.sm,
+  },
+
   dependentName: {
     ...typography.labelLg,
     color: colors.onSurface,
@@ -697,6 +757,14 @@ const styles = StyleSheet.create({
     ...typography.labelMd,
     color: colors.onSecondaryContainer,
     fontWeight: "700",
+  },
+
+  notConnectedBadge: {
+    backgroundColor: colors.surfaceContainer,
+  },
+
+  notConnectedBadgeText: {
+    color: colors.onSurfaceVariant,
   },
 
   menu: {
