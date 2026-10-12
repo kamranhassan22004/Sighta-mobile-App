@@ -25,6 +25,7 @@
     },
     "android": {
       "package": "com.sighta.guardian",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo.png",
         "backgroundColor": "#000666"
@@ -40,7 +41,14 @@
       ]
     },
     "plugins": [
-      "expo-status-bar"
-    ]
+      "expo-status-bar",
+      "expo-notifications"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "08dc0c31-0885-4f4b-a153-bcaf16f4612f"
+      }
+    },
+    "owner": "kamranhassan"
   }
 }

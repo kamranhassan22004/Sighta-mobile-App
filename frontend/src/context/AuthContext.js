@@ -4,17 +4,26 @@ import React, {
   useState,
   useEffect,
   useContext,
+  useRef,
 } from "react";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as authService from "../services/authService";
+import { registerPushNotifications } from "../services/pushNotificationService";
 
 export const AuthContext = createContext(null);
+
+// SIGHTA Guardian Expo Project ID
+const EXPO_PROJECT_ID = "08dc0c31-0885-4f4b-a153-bcaf16f4612f";
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Avoid repeated push registration during profile refreshes
+  const lastPushAttemptToken = useRef(null);
+  const pushRegistrationPromise = useRef(null);
+  const loggingOutRef = useRef(false);
   // Restore session and fetch latest profile from MongoDB
   useEffect(() => {
     let active = true;
@@ -28,7 +37,10 @@ export const AuthProvider = ({ children }) => {
           const cachedUser = JSON.parse(storedUser);
 
           if (active) {
-            setUser(cachedUser);
+            setUser({
+              ...cachedUser,
+              token,
+            });
           }
 
           try {
@@ -74,6 +86,33 @@ export const AuthProvider = ({ children }) => {
     };
   }, []);
 
+  // Register push notifications once per authenticated session
+  // Register push notifications once per authenticated session
+  useEffect(() => {
+    const token = user?.token;
+
+    if (!token || loggingOutRef.current) {
+      if (!token) {
+        lastPushAttemptToken.current = null;
+      }
+      return;
+    }
+
+    if (lastPushAttemptToken.current === token) {
+      return;
+    }
+
+    lastPushAttemptToken.current = token;
+
+    pushRegistrationPromise.current = registerPushNotifications(
+      EXPO_PROJECT_ID
+    ).catch((error) => {
+      console.log(
+        "PUSH REGISTRATION ERROR:",
+        error?.message || error
+      );
+    });
+  }, [user?.token]);
   // Login
   const login = async (email, password) => {
     const data = await authService.login(email, password);
@@ -99,9 +138,39 @@ export const AuthProvider = ({ children }) => {
   };
 
   // Logout
+  // Logout and unregister push notifications
   const logout = async () => {
-    await AsyncStorage.multiRemove(["token", "user"]);
-    setUser(null);
+    loggingOutRef.current = true;
+
+    try {
+      // Wait for any ongoing push token registration
+      if (pushRegistrationPromise.current) {
+        await pushRegistrationPromise.current;
+      }
+
+      // Remove the saved push token from MongoDB
+      try {
+        await authService.updateProfile({
+          fcmToken: null,
+        });
+
+        console.log("Push token removed from guardian account.");
+      } catch (error) {
+        console.log(
+          "PUSH TOKEN REMOVAL ERROR:",
+          error?.message || error
+        );
+      }
+    } finally {
+      // Always clear the local login session
+      await AsyncStorage.multiRemove(["token", "user"]);
+
+      lastPushAttemptToken.current = null;
+      pushRegistrationPromise.current = null;
+
+      setUser(null);
+      loggingOutRef.current = false;
+    }
   };
 
   // Fetch and persist latest profile from backend

@@ -106,38 +106,116 @@ const getProfile = async (req, res) => {
 };
 
 // @route  PUT /api/auth/profile
+
+// @route PUT /api/auth/profile
 const updateProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
+
     if (!user) {
-      return res.status(404).json({ message: "User not found" });
+      return res.status(404).json({
+        message: "User not found",
+      });
     }
 
-    const { name, dependent, emergencyContacts, notificationSettings, fcmToken } = req.body;
+    const {
+      name,
+      phone,
+      dependent,
+      emergencyContacts,
+      notificationSettings,
+      fcmToken,
+    } = req.body;
 
-    if (name) user.name = name;
-    if (dependent) user.dependent = { ...user.dependent.toObject(), ...dependent };
-    if (emergencyContacts) user.emergencyContacts = emergencyContacts;
-    if (notificationSettings)
-      user.notificationSettings = { ...user.notificationSettings.toObject(), ...notificationSettings };
-    if (fcmToken) user.fcmToken = fcmToken;
+    // Update guardian name
+    if (name !== undefined) {
+      if (typeof name !== "string" || !name.trim()) {
+        return res.status(400).json({
+          message: "Valid name is required",
+        });
+      }
 
-    const updated = await user.save();
+      user.name = name.trim();
+    }
+
+    // Update guardian phone number
+    if (phone !== undefined) {
+      if (typeof phone !== "string") {
+        return res.status(400).json({
+          message: "Invalid phone number",
+        });
+      }
+
+      const cleanedPhone = phone.trim();
+
+      if (
+        cleanedPhone &&
+        !/^\+?[0-9\s()-]{7,20}$/.test(cleanedPhone)
+      ) {
+        return res.status(400).json({
+          message: "Enter a valid phone number",
+        });
+      }
+
+      user.phone = cleanedPhone;
+    }
+
+    // Preserve existing functionality
+    if (dependent) {
+      user.dependent = {
+        ...user.dependent.toObject(),
+        ...dependent,
+      };
+    }
+
+    if (emergencyContacts) {
+      user.emergencyContacts = emergencyContacts;
+    }
+
+    if (notificationSettings) {
+      user.notificationSettings = {
+        ...user.notificationSettings.toObject(),
+        ...notificationSettings,
+      };
+    }
+
+    // Save or remove the guardian's push notification token
+    if (fcmToken !== undefined) {
+      if (fcmToken === null) {
+        // Remove push token when guardian logs out
+        user.fcmToken = null;
+      } else if (
+        typeof fcmToken === "string" &&
+        /^(ExpoPushToken|ExponentPushToken)\[[^\]]+\]$/.test(fcmToken)
+      ) {
+        // Save a valid Expo push token
+        user.fcmToken = fcmToken;
+      } else {
+        return res.status(400).json({
+          message: "Invalid push notification token",
+        });
+      }
+    }
+
+    await user.save();
 
     return res.json({
       _id: user._id,
       name: user.name,
       email: user.email,
+      phone: user.phone || "",
       dependent: user.dependent,
       device: user.device || null,
       notificationSettings: user.notificationSettings,
       token: generateToken(user._id),
     });
-
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return res.status(500).json({
+      message: error.message,
+    });
   }
 };
+
 
 // @route  POST /api/auth/forgot-password
 // @desc   Generate a 6-digit code, email it, store its hash + expiry

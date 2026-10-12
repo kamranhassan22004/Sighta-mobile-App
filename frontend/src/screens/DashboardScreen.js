@@ -33,6 +33,25 @@ const DEVICE_REFRESH = 15000;
 const ALERT_REFRESH = 30000;
 const GPS_STALE_AFTER = 20000;
 
+// Keep the newest GPS reading.
+// An older API response must not overwrite a newer reading.
+const keepNewestLocation = (previous, incoming) => {
+  if (!previous) return incoming;
+  if (!incoming) return previous;
+
+  const oldTime = new Date(previous.recordedAt).getTime();
+  const newTime = new Date(incoming.recordedAt).getTime();
+
+  if (
+    Number.isFinite(oldTime) &&
+    (!Number.isFinite(newTime) || newTime < oldTime)
+  ) {
+    return previous;
+  }
+
+  return incoming;
+};
+
 export default function DashboardScreen({ navigation }) {
   const { user } = useAuth();
 
@@ -78,7 +97,10 @@ export default function DashboardScreen({ navigation }) {
           const data = await getCurrentLocation(userId);
 
           if (active) {
-            setLocation(data);
+            setLocation((previous) =>
+              keepNewestLocation(previous, data)
+            );
+
             setLocationError(false);
           }
         } catch (error) {
@@ -100,7 +122,7 @@ export default function DashboardScreen({ navigation }) {
         }
       };
 
-      // Fetch actual registered device status
+      // Fetch actual device status
       const fetchDevice = async () => {
         if (!deviceId) {
           if (active) setDevice(null);
@@ -131,7 +153,7 @@ export default function DashboardScreen({ navigation }) {
         }
       };
 
-      // Fetch real alerts from backend
+      // Fetch alerts
       const fetchAlerts = async () => {
         if (!userId || alertsBusy) return;
 
@@ -162,30 +184,30 @@ export default function DashboardScreen({ navigation }) {
         }
       };
 
-      // Initial load
+      // Initial requests
       fetchLocation();
       fetchDevice();
       fetchAlerts();
 
-      // Automatically refresh GPS every 5 seconds
+      // GPS refresh every 5 seconds
       const locationInterval = setInterval(
         fetchLocation,
         LOCATION_REFRESH
       );
 
-      // Refresh device status every 15 seconds
+      // Device refresh every 15 seconds
       const deviceInterval = setInterval(
         fetchDevice,
         DEVICE_REFRESH
       );
 
-      // Check alerts every 30 seconds
+      // Alerts refresh every 30 seconds
       const alertsInterval = setInterval(
         fetchAlerts,
         ALERT_REFRESH
       );
 
-      // Keep "Last seen" time updated
+      // Update elapsed time
       const timeInterval = setInterval(() => {
         if (active) {
           setCurrentTime(Date.now());
@@ -203,6 +225,7 @@ export default function DashboardScreen({ navigation }) {
     }, [userId, deviceId])
   );
 
+  // Manual pull-to-refresh
   const onRefresh = async () => {
     setRefreshing(true);
 
@@ -211,25 +234,31 @@ export default function DashboardScreen({ navigation }) {
 
       if (userId) {
         requests.push(
-          getCurrentLocation(userId).then((data) => {
-            setLocation(data);
-            setLocationError(false);
-          }).catch(() => {
-            setLocationError(true);
-          })
+          getCurrentLocation(userId)
+            .then((data) => {
+              setLocation((previous) =>
+                keepNewestLocation(previous, data)
+              );
+              setLocationError(false);
+            })
+            .catch(() => {
+              setLocationError(true);
+            })
         );
 
         requests.push(
-          getAlerts(userId, 1, 1).then((result) => {
-            const alerts = Array.isArray(result)
-              ? result
-              : [];
+          getAlerts(userId, 1, 1)
+            .then((result) => {
+              const alerts = Array.isArray(result)
+                ? result
+                : [];
 
-            setLatestAlert(alerts[0] || null);
-            setAlertsError(false);
-          }).catch(() => {
-            setAlertsError(true);
-          })
+              setLatestAlert(alerts[0] || null);
+              setAlertsError(false);
+            })
+            .catch(() => {
+              setAlertsError(true);
+            })
         );
       }
 
@@ -248,27 +277,34 @@ export default function DashboardScreen({ navigation }) {
     }
   };
 
+  // =====================================
+  // GPS LIVE STATUS
+  // =====================================
+
   const recordedTime = location?.recordedAt
     ? new Date(location.recordedAt).getTime()
     : NaN;
 
   const gpsAge = currentTime - recordedTime;
 
+  // GPS remains live for 20 seconds after
+  // the last valid GPS reading.
+  // Temporary API failures do not instantly
+  // change the badge to Not Live.
   const isGpsLive =
-    !!location &&
+    Boolean(location) &&
     Number.isFinite(recordedTime) &&
-    gpsAge >= 0 &&
-    gpsAge <= GPS_STALE_AFTER &&
-    !locationError;
+    gpsAge >= -5000 &&
+    gpsAge <= GPS_STALE_AFTER;
 
   const isDeviceOnline = device?.status === "online";
 
   const hasLinkedDevice = Boolean(deviceId);
 
-  const trackingStatus = locationError
-    ? "Connection Issue"
-    : isGpsLive
-      ? "GPS Tracking Active"
+  const trackingStatus = isGpsLive
+    ? "GPS Tracking Active"
+    : locationError
+      ? "Connection Issue"
       : location
         ? "Last Known Location"
         : "Waiting for GPS";
@@ -276,6 +312,10 @@ export default function DashboardScreen({ navigation }) {
   const trackingBadge = isGpsLive
     ? "GPS Live"
     : "Not Live";
+
+  // =====================================
+  // DEVICE STATUS
+  // =====================================
 
   const deviceStatusText = !hasLinkedDevice
     ? "Not Linked"
@@ -285,15 +325,13 @@ export default function DashboardScreen({ navigation }) {
         ? "Offline"
         : "Status Unavailable";
 
+  // Battery percentage removed because
+  // actual battery monitoring is not available.
   const deviceCaption = !hasLinkedDevice
-    ? isGpsLive
-      ? "GPS active - device linking pending"
-      : "Device not linked to account"
-    : device?.batteryPercentage != null
-      ? `${device.batteryPercentage}% battery`
-      : isDeviceOnline
-        ? "Device connected"
-        : "Check device connection";
+    ? "Device not linked to account"
+    : isDeviceOnline
+      ? "Device connected"
+      : "Check device connection";
 
   if (loading) return <Loader />;
 
@@ -411,7 +449,6 @@ export default function DashboardScreen({ navigation }) {
             />
           </View>
         </View>
-
       </ScrollView>
     </View>
   );

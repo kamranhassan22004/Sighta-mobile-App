@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "333092561671",
+    "project_id": "sighta-guardian-be4fb",
+    "storage_bucket": "sighta-guardian-be4fb.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:333092561671:android:254df930c4629a97d39ba2",
+        "android_client_info": {
+          "package_name": "com.sighta.guardian"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAZxdK64QM-ZdDhuhorVO_GA9b1v0vMJrQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
