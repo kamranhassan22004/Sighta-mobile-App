@@ -53,7 +53,7 @@ const deviceSchema = new mongoose.Schema(
 
     lastSyncedAt: {
       type: Date,
-      default: Date.now,
+      default: null,
     },
   },
   { timestamps: true }

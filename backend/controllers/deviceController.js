@@ -1,4 +1,4 @@
-
+const mongoose = require("mongoose");
 const crypto = require("crypto");
 const Device = require("../models/Device");
 const User = require("../models/User");
@@ -101,37 +101,56 @@ const rotateDeviceKey = async (req, res) => {
 };
 
 // Get device status
+
 const getDeviceStatus = async (req, res) => {
   try {
+    const identifier = req.params.deviceId;
+
+    // Accept both MongoDB _id and custom deviceId
+    const identifiers = [{ deviceId: identifier }];
+
+    if (mongoose.isValidObjectId(identifier)) {
+      identifiers.push({ _id: identifier });
+    }
+
     const device = await Device.findOne({
-      deviceId: req.params.deviceId,
       owner: req.user._id,
-    });
+      $or: identifiers,
+    }).select("-apiKeyHash");
 
     if (!device) {
       return res.status(404).json({
-        message: "Device not found",
+        message: "Device not found for this guardian",
       });
     }
 
     const result = device.toObject();
 
-    // Mark device offline if no update for 15 seconds
-    if (
-      result.status === "online" &&
-      (!result.lastSyncedAt ||
-        Date.now() - new Date(result.lastSyncedAt).getTime() > 15000)
-    ) {
-      result.status = "offline";
-    }
+    // A device is online only if it has synced recently
+    const lastSyncTime = result.lastSyncedAt
+      ? new Date(result.lastSyncedAt).getTime()
+      : NaN;
+
+    const isRecent =
+      Number.isFinite(lastSyncTime) &&
+      Date.now() - lastSyncTime >= 0 &&
+      Date.now() - lastSyncTime <= 15000;
+
+    result.status =
+      result.status === "online" && isRecent
+        ? "online"
+        : "offline";
 
     return res.json(result);
   } catch (error) {
+    console.log("GET DEVICE STATUS ERROR:", error);
+
     return res.status(500).json({
-      message: error.message,
+      message: "Unable to fetch device status",
     });
   }
 };
+
 
 // Update device details from guardian account
 const updateDevice = async (req, res) => {

@@ -5,7 +5,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 // - Android emulator: use 10.0.2.2 instead of localhost
 // - Physical device (Expo Go): use your computer's LAN IP, e.g. http://192.168.1.5:5000/api
 // - Deployed backend: use its public URL
-export const BASE_URL = "http://192.168.100.4:5000/api";
+export const BASE_URL = "http://192.168.1.100:5000/api";
 
 const api = axios.create({
   baseURL: BASE_URL,

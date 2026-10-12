@@ -24,6 +24,7 @@
       }
     },
     "android": {
+      "package": "com.sighta.guardian",
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo.png",
         "backgroundColor": "#000666"

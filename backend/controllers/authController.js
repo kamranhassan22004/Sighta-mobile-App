@@ -39,12 +39,17 @@ const registerUser = async (req, res) => {
       },
     });
 
+
     return res.status(201).json({
       _id: user._id,
       name: user.name,
       email: user.email,
+      dependent: user.dependent,
+      device: user.device || null,
+      notificationSettings: user.notificationSettings,
       token: generateToken(user._id),
     });
+
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -84,8 +89,11 @@ const loginUser = async (req, res) => {
 const getProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id)
-      .select("-password")
-      .populate("device");
+      .select("-password -resetCodeHash -resetCodeExpires -fcmToken")
+      .populate({
+        path: "device",
+        select: "-apiKeyHash",
+      });
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -115,14 +123,17 @@ const updateProfile = async (req, res) => {
     if (fcmToken) user.fcmToken = fcmToken;
 
     const updated = await user.save();
+
     return res.json({
-      _id: updated._id,
-      name: updated.name,
-      email: updated.email,
-      dependent: updated.dependent,
-      emergencyContacts: updated.emergencyContacts,
-      notificationSettings: updated.notificationSettings,
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      dependent: user.dependent,
+      device: user.device || null,
+      notificationSettings: user.notificationSettings,
+      token: generateToken(user._id),
     });
+
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

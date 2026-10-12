@@ -1,10 +1,49 @@
 
 const crypto = require("crypto");
-
+const DeviceEvent = require("../models/DeviceEvent");
 const Location = require("../models/Location");
 const LiveLocation = require("../models/LiveLocation");
 const Device = require("../models/Device");
+const { reverseGeocode } = require("../services/reverseGeocode");
 
+const pendingAddressUpdates = new Set();
+
+const enrichLocationAddress = (location) => {
+  if (!location || location.address?.trim()) return;
+
+  const id = String(location._id);
+
+  if (pendingAddressUpdates.has(id)) return;
+
+  pendingAddressUpdates.add(id);
+
+  (async () => {
+    try {
+      const address = await reverseGeocode(
+        location.latitude,
+        location.longitude
+      );
+
+      if (address) {
+        await Location.updateOne(
+          {
+            _id: location._id,
+            $or: [
+              { address: "" },
+              { address: null },
+              { address: { $exists: false } },
+            ],
+          },
+          { $set: { address } }
+        );
+      }
+    } catch (error) {
+      console.warn("Address update failed:", error.message);
+    } finally {
+      pendingAddressUpdates.delete(id);
+    }
+  })();
+};
 // Validate GPS coordinates
 const isValidCoordinates = (latitude, longitude) => {
   return (
@@ -56,10 +95,10 @@ const saveGPSLocation = async (
   if (
     !lastHistory ||
     now.getTime() -
-      new Date(lastHistory.recordedAt).getTime() >=
-      60000
+    new Date(lastHistory.recordedAt).getTime() >=
+    60000
   ) {
-    await Location.create({
+    const savedLocation = await Location.create({
       user: device.owner,
       device: device._id,
       latitude,
@@ -67,14 +106,61 @@ const saveGPSLocation = async (
       address,
       recordedAt: now,
     });
+
+    // Resolve address in background
+    enrichLocationAddress(savedLocation);
   }
 
   // Mark Raspberry Pi device as online
+  // Check whether the Raspberry Pi was already connected
+  const previousSync = device.lastSyncedAt
+    ? new Date(device.lastSyncedAt).getTime()
+    : null;
+
+  const connectionExpired =
+    !previousSync ||
+    now.getTime() - previousSync > 30000;
+
+  const wasOffline = device.status !== "online";
+
+  // Check whether a connection event was ever recorded
+  const previousConnection = await DeviceEvent.exists({
+    device: device._id,
+    type: {
+      $in: ["device_connected", "device_reconnected"],
+    },
+  });
+
+  // Update real device status
   device.status = "online";
   device.lastSyncedAt = now;
   await device.save();
 
+  // Only record first connection or reconnection
+  if (!previousConnection || wasOffline || connectionExpired) {
+    const eventType = previousConnection
+      ? "device_reconnected"
+      : "device_connected";
+
+    try {
+      await DeviceEvent.create({
+        user: device.owner,
+        device: device._id,
+        type: eventType,
+        message: previousConnection
+          ? "SIGHTA device reconnected successfully"
+          : "SIGHTA device connected successfully",
+        occurredAt: now,
+      });
+
+      console.log("DEVICE EVENT SAVED:", eventType);
+    } catch (error) {
+      console.error("DEVICE EVENT ERROR:", error.message);
+    }
+  }
+
   return liveLocation;
+
 };
 
 // Raspberry Pi sends GPS location using device key
@@ -259,6 +345,13 @@ const getLocationHistory = async (req, res) => {
       .sort({ recordedAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit);
+
+    // Backfill missing addresses without delaying the response.
+    // Only the first five missing records per request are queued.
+    history
+      .filter((item) => !item.address?.trim())
+      .slice(0, 5)
+      .forEach(enrichLocationAddress);
 
     return res.json(history);
   } catch (error) {

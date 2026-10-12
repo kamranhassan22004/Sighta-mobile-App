@@ -3,6 +3,7 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet } from "react-native
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../context/AuthContext";
+import { getDeviceEvents } from "../services/deviceEventService";
 import Header from "../components/Header";
 import Loader from "../components/Loader";
 import { colors, spacing, radius, typography } from "../theme/colors";
@@ -14,6 +15,15 @@ const FILTERS = ["All", "Alerts", "Location", "Device"];
 
 const iconForType = (type) => {
   switch (type) {
+    case "device_connected":
+    case "device_reconnected":
+      return { name: "wifi", color: colors.success };
+
+    case "device_disconnected":
+      return { name: "wifi-outline", color: colors.error };
+
+    case "battery_low":
+      return { name: "battery-half", color: "#d48700" };
     case "sos":
       return { name: "warning", color: colors.error };
     case "location":
@@ -37,36 +47,68 @@ export default function HistoryScreen() {
   const load = useCallback(async () => {
     if (!user?._id) return;
     try {
-      const [alertsResult, locationResult] = await Promise.allSettled([
-        getAlerts(user._id, 1, 30),
-        getLocationHistory(user._id, 1, 15),
-      ]);
+      const [alertsResult, locationResult, deviceResult] =
+        await Promise.allSettled([
+          getAlerts(user._id, 1, 30),
+          getLocationHistory(user._id, 1, 15),
+          getDeviceEvents(user._id, 1, 30),
+        ]);
 
       const alertItems =
         alertsResult.status === "fulfilled"
           ? alertsResult.value.map((a) => ({
-              id: a._id,
-              category: "Alerts",
-              type: a.type,
-              title: alertTypeLabel(a.type),
-              description: a.message,
-              time: a.triggeredAt,
-            }))
+            id: `alert-${a._id}`,
+            category: "Alerts",
+            type: a.type,
+            title: alertTypeLabel(a.type),
+            description: a.message,
+            time: a.triggeredAt,
+          }))
           : [];
 
       const locationItems =
         locationResult.status === "fulfilled"
           ? locationResult.value.map((l) => ({
-              id: l._id,
-              category: "Location",
-              type: "location",
-              title: "Location Updated",
-              description: l.address || `${l.latitude.toFixed(4)}, ${l.longitude.toFixed(4)}`,
-              time: l.recordedAt,
-            }))
+            id: `location-${l._id}`,
+            category: "Location",
+            type: "location",
+            title: "Location Updated",
+            description:
+              typeof l.address === "string" && l.address.trim()
+                ? l.address.trim()
+                : "Location name unavailable",
+            time: l.recordedAt,
+          }))
           : [];
 
-      const merged = [...alertItems, ...locationItems].sort(
+      const deviceItems =
+        deviceResult.status === "fulfilled" &&
+          Array.isArray(deviceResult.value)
+          ? deviceResult.value.map((event) => ({
+            id: `device-${event._id}`,
+            category: "Device",
+            type: event.type,
+            title:
+              event.type === "device_connected"
+                ? "Device Connected"
+                : event.type === "device_reconnected"
+                  ? "Device Reconnected"
+                  : event.type === "device_disconnected"
+                    ? "Device Disconnected"
+                    : event.type === "battery_low"
+                      ? "Low Battery"
+                      : "Device Activity",
+            description: event.message,
+            time: event.occurredAt,
+          }))
+          : [];
+
+
+      const merged = [
+        ...alertItems,
+        ...locationItems,
+        ...deviceItems,
+      ].sort(
         (a, b) => new Date(b.time) - new Date(a.time)
       );
       setItems(merged);
@@ -84,7 +126,11 @@ export default function HistoryScreen() {
   const filtered = useMemo(() => {
     if (activeFilter === "All") return items;
     if (activeFilter === "Device") {
-      return items.filter((i) => i.type === "low_battery" || i.type === "device_offline" || i.type === "device_online");
+      return items.filter(
+        (i) =>
+          i.category === "Device" ||
+          ["low_battery", "device_offline"].includes(i.type)
+      );
     }
     return items.filter((i) => i.category === activeFilter);
   }, [items, activeFilter]);
@@ -115,7 +161,15 @@ export default function HistoryScreen() {
       {filtered.length === 0 ? (
         <View style={styles.emptyWrap}>
           <Ionicons name="time-outline" size={48} color={colors.outline} />
-          <Text style={styles.emptyText}>Nothing to show for this filter yet.</Text>
+          <Text style={styles.emptyText}>
+            {activeFilter === "Device"
+              ? "No device activity recorded yet."
+              : activeFilter === "Location"
+                ? "No location history available yet."
+                : activeFilter === "Alerts"
+                  ? "No alerts recorded yet."
+                  : "No activity recorded yet."}
+          </Text>
         </View>
       ) : (
         <FlatList
