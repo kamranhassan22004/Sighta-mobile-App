@@ -6,7 +6,7 @@ const Device = require("../models/Device");
 const Location = require("../models/Location");
 const DeviceEvent = require("../models/DeviceEvent");
 const Alert = require("../models/Alert");
-
+const { protect } = require("../middleware/authMiddleware");
 const {
   sendPushNotification,
 } = require("../services/pushNotificationService");
@@ -210,6 +210,110 @@ router.get("/run", async (req, res) => {
 
     return res.status(500).json({
       message: "Unable to generate daily summary",
+    });
+  }
+});
+// GET /api/daily-summary/activity?date=2026-10-13
+router.get("/activity", protect, async (req, res) => {
+  try {
+    const date = req.query.date || getPakistanDate();
+
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      !Number.isFinite(
+        new Date(`${date}T00:00:00+05:00`).getTime()
+      )
+    ) {
+      return res.status(400).json({
+        message: "Invalid date",
+      });
+    }
+
+    const { start, end } = getDayRange(date);
+    const userId = req.user._id;
+
+    const device = await Device.findOne({
+      owner: userId,
+    });
+
+    const gpsUpdates = await getGPSCount(
+      userId,
+      device?._id,
+      start,
+      end
+    );
+
+    const dateField = [
+      "recordedAt",
+      "timestamp",
+      "createdAt",
+    ].find((field) => Location.schema.path(field));
+
+    let lastLocation = null;
+
+    if (dateField) {
+      const locationQuery = {
+        [dateField]: {
+          $gte: start,
+          $lte: end,
+        },
+      };
+
+      let canQuery = false;
+
+      if (Location.schema.path("user")) {
+        locationQuery.user = userId;
+        canQuery = true;
+      } else if (
+        Location.schema.path("device") &&
+        device
+      ) {
+        locationQuery.device = device._id;
+        canQuery = true;
+      }
+
+      if (canQuery) {
+        const location = await Location.findOne(
+          locationQuery
+        )
+          .sort({ [dateField]: -1 })
+          .lean();
+
+        if (location) {
+          lastLocation = {
+            latitude: location.latitude,
+            longitude: location.longitude,
+            address: location.address || "",
+            recordedAt: location[dateField],
+          };
+        }
+      }
+    }
+
+    const [deviceEvents, sosAlerts] = await Promise.all([
+      DeviceEvent.countDocuments({
+        user: userId,
+        occurredAt: { $gte: start, $lte: end },
+      }),
+      Alert.countDocuments({
+        user: userId,
+        type: "sos",
+        triggeredAt: { $gte: start, $lte: end },
+      }),
+    ]);
+
+    return res.json({
+      date,
+      gpsUpdates,
+      deviceEvents,
+      sosAlerts,
+      lastLocation,
+    });
+  } catch (error) {
+    console.error("DAILY ACTIVITY ERROR:", error);
+
+    return res.status(500).json({
+      message: "Unable to fetch daily activity",
     });
   }
 });
