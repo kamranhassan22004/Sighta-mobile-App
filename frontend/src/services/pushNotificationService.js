@@ -1,56 +1,107 @@
 
 import { Platform } from "react-native";
+import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
+import * as Device from "expo-device";
+
 import * as authService from "./authService";
 
-export const registerPushNotifications = async (projectId) => {
+export async function registerPushNotifications(projectId) {
   try {
-    if (!projectId) {
-      console.log("Expo project ID is not configured yet.");
+    if (!Device.isDevice) {
+      console.log(
+        "Push notifications require a physical device."
+      );
       return null;
     }
 
-    // Check existing notification permission
+    // Android notification channel
+    if (Platform.OS === "android") {
+      await Notifications.setNotificationChannelAsync(
+        "default",
+        {
+          name: "SIGHTA Guardian Alerts",
+          importance: Notifications.AndroidImportance.MAX,
+          vibrationPattern: [0, 250, 250, 250],
+          enableVibrate: true,
+          sound: "default",
+        }
+      );
+    }
+
+    // Check permission
     const existingPermission =
       await Notifications.getPermissionsAsync();
 
-    let status = existingPermission.status;
+    let finalStatus = existingPermission.status;
 
-    // Ask permission only when necessary
-    if (status !== "granted") {
+    if (finalStatus !== "granted") {
       const requestedPermission =
         await Notifications.requestPermissionsAsync();
 
-      status = requestedPermission.status;
+      finalStatus = requestedPermission.status;
     }
 
-    if (status !== "granted") {
-      console.log("Notification permission not granted.");
+    if (finalStatus !== "granted") {
+      console.log(
+        "Notification permission not granted."
+      );
       return null;
     }
 
-    // Get this device's Expo push token
+    // Expo EAS project ID
+    const resolvedProjectId =
+      projectId ||
+      Constants.easConfig?.projectId ||
+      Constants.expoConfig?.extra?.eas?.projectId;
+
+    if (!resolvedProjectId) {
+      throw new Error(
+        "Expo project ID is missing."
+      );
+    }
+
+    // Generate Expo push token
     const tokenResponse =
       await Notifications.getExpoPushTokenAsync({
-        projectId,
+        projectId: resolvedProjectId,
       });
 
-    const pushToken = tokenResponse.data;
+    const expoPushToken = tokenResponse.data;
 
-    // Save token against logged-in guardian account
+    if (
+      !expoPushToken ||
+      !(
+        expoPushToken.startsWith("ExponentPushToken[") ||
+        expoPushToken.startsWith("ExpoPushToken[")
+      )
+    ) {
+      throw new Error(
+        "Valid Expo push token was not returned."
+      );
+    }
+
+    console.log(
+      "SIGHTA EXPO PUSH TOKEN:",
+      expoPushToken
+    );
+
+    // Save token in guardian's MongoDB account
     await authService.updateProfile({
-      fcmToken: pushToken,
+      fcmToken: expoPushToken,
     });
 
-    console.log("Guardian push token registered.");
+    console.log(
+      "SIGHTA push token saved successfully."
+    );
 
-    return pushToken;
+    return expoPushToken;
   } catch (error) {
     console.log(
-      "PUSH REGISTRATION ERROR:",
+      "PUSH REGISTRATION FAILED:",
       error?.message || error
     );
 
-    return null;
+    throw error;
   }
-};
+}

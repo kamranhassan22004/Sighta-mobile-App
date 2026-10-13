@@ -7,9 +7,9 @@
     "icon": "./assets/logo.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/logo.png",
+      "image": "./assets/sighta-matching-splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#000666"
+      "backgroundColor": "#030C2D"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -42,7 +42,16 @@
     },
     "plugins": [
       "expo-status-bar",
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#030C2D",
+          "image": "./assets/sighta-matching-splash.png",
+          "imageWidth": 300,
+          "resizeMode": "contain"
+        }
+      ]
     ],
     "extra": {
       "eas": {

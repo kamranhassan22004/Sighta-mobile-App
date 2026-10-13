@@ -9,29 +9,54 @@ import React, {
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as authService from "../services/authService";
-import { registerPushNotifications } from "../services/pushNotificationService";
 
 export const AuthContext = createContext(null);
 
-// SIGHTA Guardian Expo Project ID
-const EXPO_PROJECT_ID = "08dc0c31-0885-4f4b-a153-bcaf16f4612f";
+const EXPO_PROJECT_ID =
+  "08dc0c31-0885-4f4b-a153-bcaf16f4612f";
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Avoid repeated push registration during profile refreshes
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [loadingMessage, setLoadingMessage] = useState(
+    "Starting SIGHTA Guardian..."
+  );
+
   const lastPushAttemptToken = useRef(null);
   const pushRegistrationPromise = useRef(null);
   const loggingOutRef = useRef(false);
-  // Restore session and fetch latest profile from MongoDB
+
+  // Restore saved login session
   useEffect(() => {
     let active = true;
+    let firstFrame = null;
+    let secondFrame = null;
+
+    const updateProgress = (value, message) => {
+      if (!active) return;
+
+      setLoadingProgress(value);
+      setLoadingMessage(message);
+    };
 
     const bootstrap = async () => {
       try {
-        const storedUser = await AsyncStorage.getItem("user");
-        const token = await AsyncStorage.getItem("token");
+        updateProgress(
+          5,
+          "Checking saved session..."
+        );
+
+        const [storedUser, token] = await Promise.all([
+          AsyncStorage.getItem("user"),
+          AsyncStorage.getItem("token"),
+        ]);
+
+        updateProgress(
+          35,
+          "Session check complete"
+        );
 
         if (storedUser && token) {
           const cachedUser = JSON.parse(storedUser);
@@ -43,9 +68,19 @@ export const AuthProvider = ({ children }) => {
             });
           }
 
+          updateProgress(
+            55,
+            "Loading your account..."
+          );
+
           try {
-            // Get latest user details, including linked device
-            const profile = await authService.getProfile();
+            const profile =
+              await authService.getProfile();
+
+            updateProgress(
+              85,
+              "Preparing your dashboard..."
+            );
 
             const updatedUser = {
               ...cachedUser,
@@ -59,22 +94,56 @@ export const AuthProvider = ({ children }) => {
                 JSON.stringify(updatedUser)
               );
 
-              setUser(updatedUser);
+              if (active) {
+                setUser(updatedUser);
+              }
             }
+
+            updateProgress(
+              95,
+              "Account ready"
+            );
           } catch (error) {
             console.log(
               "PROFILE REFRESH ERROR:",
               error?.message || error
             );
 
-            // Keep cached session if server is temporarily unavailable
+            updateProgress(
+              95,
+              "Using your saved account..."
+            );
           }
+        } else {
+          updateProgress(
+            95,
+            "Preparing login screen..."
+          );
         }
       } catch (error) {
-        console.warn("Failed to restore session", error);
+        console.warn(
+          "Failed to restore session:",
+          error?.message || error
+        );
+
+        updateProgress(
+          95,
+          "Preparing application..."
+        );
       } finally {
         if (active) {
-          setIsLoading(false);
+          updateProgress(
+            100,
+            "SIGHTA Guardian is ready!"
+          );
+
+          firstFrame = requestAnimationFrame(() => {
+            secondFrame = requestAnimationFrame(() => {
+              if (active) {
+                setIsLoading(false);
+              }
+            });
+          });
         }
       }
     };
@@ -83,11 +152,18 @@ export const AuthProvider = ({ children }) => {
 
     return () => {
       active = false;
+
+      if (firstFrame !== null) {
+        cancelAnimationFrame(firstFrame);
+      }
+
+      if (secondFrame !== null) {
+        cancelAnimationFrame(secondFrame);
+      }
     };
   }, []);
 
-  // Register push notifications once per authenticated session
-  // Register push notifications once per authenticated session
+  // Register push notifications after login
   useEffect(() => {
     const token = user?.token;
 
@@ -104,57 +180,81 @@ export const AuthProvider = ({ children }) => {
 
     lastPushAttemptToken.current = token;
 
-    pushRegistrationPromise.current = registerPushNotifications(
-      EXPO_PROJECT_ID
-    ).catch((error) => {
-      console.log(
-        "PUSH REGISTRATION ERROR:",
-        error?.message || error
-      );
-    });
+    const {
+      registerPushNotifications,
+    } = require("../services/pushNotificationService");
+
+    pushRegistrationPromise.current =
+      registerPushNotifications(
+        EXPO_PROJECT_ID
+      ).catch((error) => {
+        console.log(
+          "PUSH REGISTRATION ERROR:",
+          error?.message || error
+        );
+      });
   }, [user?.token]);
+
   // Login
   const login = async (email, password) => {
-    const data = await authService.login(email, password);
+    const data = await authService.login(
+      email,
+      password
+    );
 
-    await AsyncStorage.setItem("token", data.token);
-    await AsyncStorage.setItem("user", JSON.stringify(data));
+    await AsyncStorage.setItem(
+      "token",
+      data.token
+    );
+
+    await AsyncStorage.setItem(
+      "user",
+      JSON.stringify(data)
+    );
 
     setUser(data);
 
     return data;
   };
 
-  // Register
+  // Register new account
   const register = async (payload) => {
-    const data = await authService.register(payload);
+    const data = await authService.register(
+      payload
+    );
 
-    await AsyncStorage.setItem("token", data.token);
-    await AsyncStorage.setItem("user", JSON.stringify(data));
+    await AsyncStorage.setItem(
+      "token",
+      data.token
+    );
+
+    await AsyncStorage.setItem(
+      "user",
+      JSON.stringify(data)
+    );
 
     setUser(data);
 
     return data;
   };
 
-  // Logout
-  // Logout and unregister push notifications
+  // Logout and clear push token
   const logout = async () => {
     loggingOutRef.current = true;
 
     try {
-      // Wait for any ongoing push token registration
       if (pushRegistrationPromise.current) {
         await pushRegistrationPromise.current;
       }
 
-      // Remove the saved push token from MongoDB
       try {
         await authService.updateProfile({
           fcmToken: null,
         });
 
-        console.log("Push token removed from guardian account.");
+        console.log(
+          "Push token removal requested."
+        );
       } catch (error) {
         console.log(
           "PUSH TOKEN REMOVAL ERROR:",
@@ -162,8 +262,10 @@ export const AuthProvider = ({ children }) => {
         );
       }
     } finally {
-      // Always clear the local login session
-      await AsyncStorage.multiRemove(["token", "user"]);
+      await AsyncStorage.multiRemove([
+        "token",
+        "user",
+      ]);
 
       lastPushAttemptToken.current = null;
       pushRegistrationPromise.current = null;
@@ -173,12 +275,16 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Fetch and persist latest profile from backend
+  // Refresh user profile
   const refreshProfile = async () => {
-    const profile = await authService.getProfile();
+    const profile =
+      await authService.getProfile();
 
-    const storedUser = await AsyncStorage.getItem("user");
-    const token = await AsyncStorage.getItem("token");
+    const storedUser =
+      await AsyncStorage.getItem("user");
+
+    const token =
+      await AsyncStorage.getItem("token");
 
     const cachedUser = storedUser
       ? JSON.parse(storedUser)
@@ -205,6 +311,8 @@ export const AuthProvider = ({ children }) => {
       value={{
         user,
         isLoading,
+        loadingProgress,
+        loadingMessage,
         login,
         register,
         logout,
@@ -216,4 +324,5 @@ export const AuthProvider = ({ children }) => {
   );
 };
 
-export const useAuth = () => useContext(AuthContext);
+export const useAuth = () =>
+  useContext(AuthContext);

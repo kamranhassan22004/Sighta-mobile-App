@@ -1,5 +1,5 @@
-
 import React, { useState, useCallback } from "react";
+
 import {
   View,
   Text,
@@ -87,7 +87,10 @@ export default function DashboardScreen({ navigation }) {
       let deviceBusy = false;
       let alertsBusy = false;
 
-      // Fetch latest GPS location
+      // =====================================
+      // FETCH LATEST GPS LOCATION
+      // =====================================
+
       const fetchLocation = async () => {
         if (!userId || locationBusy) return;
 
@@ -122,7 +125,10 @@ export default function DashboardScreen({ navigation }) {
         }
       };
 
-      // Fetch actual device status
+      // =====================================
+      // FETCH ACTUAL DEVICE STATUS
+      // =====================================
+
       const fetchDevice = async () => {
         if (!deviceId) {
           if (active) setDevice(null);
@@ -153,7 +159,10 @@ export default function DashboardScreen({ navigation }) {
         }
       };
 
-      // Fetch alerts
+      // =====================================
+      // FETCH LATEST ALERT
+      // =====================================
+
       const fetchAlerts = async () => {
         if (!userId || alertsBusy) return;
 
@@ -184,7 +193,10 @@ export default function DashboardScreen({ navigation }) {
         }
       };
 
-      // Initial requests
+      // =====================================
+      // INITIAL REQUESTS
+      // =====================================
+
       fetchLocation();
       fetchDevice();
       fetchAlerts();
@@ -225,7 +237,10 @@ export default function DashboardScreen({ navigation }) {
     }, [userId, deviceId])
   );
 
-  // Manual pull-to-refresh
+  // =====================================
+  // MANUAL PULL TO REFRESH
+  // =====================================
+
   const onRefresh = async () => {
     setRefreshing(true);
 
@@ -239,6 +254,7 @@ export default function DashboardScreen({ navigation }) {
               setLocation((previous) =>
                 keepNewestLocation(previous, data)
               );
+
               setLocationError(false);
             })
             .catch(() => {
@@ -357,6 +373,10 @@ export default function DashboardScreen({ navigation }) {
           />
         }
       >
+        {/* =====================================
+            GREETING
+        ===================================== */}
+
         <Text style={styles.greeting}>
           Hello, {user?.name?.split(" ")[0] || "Guardian"}
         </Text>
@@ -365,7 +385,10 @@ export default function DashboardScreen({ navigation }) {
           Here's how {dependentName} is doing right now.
         </Text>
 
-        {/* Live GPS Tracking Status */}
+        {/* =====================================
+            LIVE GPS TRACKING STATUS
+        ===================================== */}
+
         <StatusCard
           label={`${dependentName}'s Status`}
           value={trackingStatus}
@@ -379,7 +402,10 @@ export default function DashboardScreen({ navigation }) {
           badgeTone={isGpsLive ? "success" : "error"}
         />
 
-        {/* Current Location Map */}
+        {/* =====================================
+            CURRENT LOCATION MAP
+        ===================================== */}
+
         <View style={styles.mapCard}>
           <Text style={styles.mapLabel}>
             Current Location
@@ -393,11 +419,15 @@ export default function DashboardScreen({ navigation }) {
           />
         </View>
 
-        {/* Latest Alert */}
+        {/* =====================================
+            LATEST ALERT - RESPONSIVE LAYOUT
+        ===================================== */}
+
         {latestAlert ? (
           <StatusCard
             label="Latest Alert"
             value={latestAlert.message}
+            compactValue={true}
             caption={
               latestAlert.triggeredAt
                 ? timeAgo(latestAlert.triggeredAt)
@@ -432,7 +462,10 @@ export default function DashboardScreen({ navigation }) {
           />
         )}
 
-        {/* Device Status */}
+        {/* =====================================
+            SIGHTA DEVICE STATUS
+        ===================================== */}
+
         <View style={styles.row}>
           <View style={{ flex: 1 }}>
             <StatusCard

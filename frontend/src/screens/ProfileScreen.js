@@ -17,7 +17,6 @@ import { useFocusEffect } from "@react-navigation/native";
 
 import { useAuth } from "../context/AuthContext";
 import { updateProfile } from "../services/authService";
-
 import Header from "../components/Header";
 
 import {
@@ -39,24 +38,19 @@ export default function ProfileScreen({ navigation }) {
     user?.dependent?.relationship || ""
   );
 
-  // A device is linked when the account has a device
-  // reference in its backend profile.
-  // Device online/offline is a separate status.
+  // Device linked status is separate from online/offline status
   const isDeviceLinked = Boolean(
-  user?.device &&
-    (typeof user.device !== "object" ||
-      user.device._id ||
-      user.device.id ||
-      user.device.deviceId)
-);
+    user?.device &&
+      (typeof user.device !== "object" ||
+        user.device._id ||
+        user.device.id ||
+        user.device.deviceId)
+  );
 
-  // Missing dependent name does not mean device is unlinked.
   const sightaUserName = isDeviceLinked
     ? user?.dependent?.name?.trim() || "SIGHTA User"
     : "Not linked yet";
 
-  // Fetch the latest account information whenever
-  // the Profile screen becomes active.
   useFocusEffect(
     useCallback(() => {
       let active = true;
@@ -84,8 +78,6 @@ export default function ProfileScreen({ navigation }) {
     }, [refreshProfile])
   );
 
-  // Sync form values when profile changes,
-  // but do not overwrite fields during editing.
   useEffect(() => {
     if (!isEditing) {
       setName(user?.name || "");
@@ -230,7 +222,6 @@ export default function ProfileScreen({ navigation }) {
         <Section title="Contact Information">
           {isEditing ? (
             <>
-              {/* Full Name */}
               <View style={styles.inputCard}>
                 <Text style={styles.inputLabel}>
                   Full Name
@@ -249,14 +240,12 @@ export default function ProfileScreen({ navigation }) {
                 />
               </View>
 
-              {/* Email is read-only */}
               <InfoRow
                 icon="mail-outline"
                 label="Email"
                 value={user?.email || "Not set"}
               />
 
-              {/* Phone Number */}
               <View style={styles.inputCard}>
                 <Text style={styles.inputLabel}>
                   Phone Number
@@ -281,7 +270,6 @@ export default function ProfileScreen({ navigation }) {
                 </Text>
               </View>
 
-              {/* Relationship */}
               <View style={styles.inputCard}>
                 <Text style={styles.inputLabel}>
                   Relationship with SIGHTA User
@@ -306,7 +294,6 @@ export default function ProfileScreen({ navigation }) {
                 </Text>
               </View>
 
-              {/* Save / Cancel */}
               <View style={styles.actionRow}>
                 <TouchableOpacity
                   style={styles.cancelButton}
@@ -450,13 +437,20 @@ export default function ProfileScreen({ navigation }) {
             }
           />
 
+          {/* NEW: Daily Activity */}
+          <MenuRow
+            icon="calendar-outline"
+            label="Daily Activity"
+            onPress={() =>
+              navigation.navigate("DailyActivity")
+            }
+          />
+
           <MenuRow
             icon="lock-closed-outline"
             label="Privacy & Security"
             onPress={() =>
-              navigation.navigate(
-                "PrivacySecurity"
-              )
+              navigation.navigate("PrivacySecurity")
             }
           />
 
@@ -464,9 +458,7 @@ export default function ProfileScreen({ navigation }) {
             icon="help-circle-outline"
             label="Help & Support"
             onPress={() =>
-              navigation.navigate(
-                "HelpSupport"
-              )
+              navigation.navigate("HelpSupport")
             }
           />
 
