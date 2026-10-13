@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const crypto = require("crypto");
 const Device = require("../models/Device");
 const User = require("../models/User");
+const { sendPushNotification } = require("../services/pushNotificationService");
 
 // Generate a secure key for Raspberry Pi
 const generateDeviceKey = () => {
@@ -173,6 +174,23 @@ const updateDevice = async (req, res) => {
       });
     }
 
+    // Validate battery reading
+    if (
+      batteryPercentage !== undefined &&
+      (
+        typeof batteryPercentage !== "number" ||
+        !Number.isFinite(batteryPercentage) ||
+        batteryPercentage < 0 ||
+        batteryPercentage > 100
+      )
+    ) {
+      return res.status(400).json({
+        message: "Battery percentage must be between 0 and 100",
+      });
+    }
+
+    const previousBattery = device.batteryPercentage;
+
     if (status) device.status = status;
 
     if (batteryPercentage !== undefined) {
@@ -194,8 +212,41 @@ const updateDevice = async (req, res) => {
 
     const updated = await device.save();
 
+    // Notify only when battery crosses below 20%
+    const batteryJustBecameLow =
+      batteryPercentage !== undefined &&
+      batteryPercentage < 20 &&
+      typeof previousBattery === "number" &&
+      previousBattery >= 20;
+
+    if (batteryJustBecameLow) {
+      const guardian = await User.findById(device.owner);
+
+      if (
+        guardian &&
+        guardian.notificationSettings?.lowBattery !== false &&
+        guardian.fcmToken
+      ) {
+        try {
+          await sendPushNotification({
+            pushToken: guardian.fcmToken,
+            title: "🔋 SIGHTA Low Battery",
+            body: `Your SIGHTA device battery is at ${batteryPercentage}%. Please charge it.`,
+            data: {
+              type: "lowBattery",
+              deviceId: device.deviceId,
+            },
+          });
+        } catch (error) {
+          console.error("LOW BATTERY PUSH ERROR:", error);
+        }
+      }
+    }
+
     return res.json(updated);
   } catch (error) {
+    console.error("UPDATE DEVICE ERROR:", error);
+
     return res.status(500).json({
       message: error.message,
     });

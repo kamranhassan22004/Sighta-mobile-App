@@ -43,6 +43,7 @@ app.use("/api/alerts", require("./routes/alertRoutes"));
 
 // Device routes
 app.use("/api/device", require("./routes/deviceRoutes"));
+app.use("/api/device-monitor", require("./routes/deviceOfflineRoutes"));
 
 // Device activity history
 app.use(
