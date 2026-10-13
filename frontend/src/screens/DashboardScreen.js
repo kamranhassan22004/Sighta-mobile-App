@@ -313,7 +313,13 @@ export default function DashboardScreen({ navigation }) {
     gpsAge >= -5000 &&
     gpsAge <= GPS_STALE_AFTER;
 
-  const isDeviceOnline = device?.status === "online";
+  const deviceSyncTime = device?.lastSyncedAt
+    ? new Date(device.lastSyncedAt).getTime()
+    : NaN;
+  const deviceSyncAge = Date.now() - deviceSyncTime;
+  const isDeviceOnline = device?.status === "online" &&
+    Number.isFinite(deviceSyncTime) && deviceSyncAge >= 0 &&
+    deviceSyncAge <= 15000;
 
   const hasLinkedDevice = Boolean(deviceId);
 
@@ -337,7 +343,7 @@ export default function DashboardScreen({ navigation }) {
     ? "Not Linked"
     : isDeviceOnline
       ? "Online"
-      : device?.status === "offline"
+      : device?.status === "offline" || device?.status === "online"
         ? "Offline"
         : "Status Unavailable";
 

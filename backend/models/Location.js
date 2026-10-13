@@ -16,5 +16,6 @@ const locationSchema = new mongoose.Schema(
 
 // Fast lookup of most recent location per user
 locationSchema.index({ user: 1, recordedAt: -1 });
+locationSchema.index({ device: 1, recordedAt: -1 });
 
 module.exports = mongoose.model("Location", locationSchema);

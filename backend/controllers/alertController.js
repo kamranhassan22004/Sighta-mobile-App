@@ -1,6 +1,8 @@
 
 const mongoose = require("mongoose");
 const Alert = require("../models/Alert");
+const { getAuthorizedDevice } = require("../services/deviceAccessService");
+const { alertQuery, alertView } = require("../services/alertAccessService");
 
 // Guardian-created alerts.
 // Automatic device alerts will be created by trusted backend logic.
@@ -59,7 +61,7 @@ const createAlert = async (req, res) => {
 
     const alert = await Alert.create({
       user: req.user._id,
-      device: req.user.device?._id || req.user.device || undefined,
+      device: (await getAuthorizedDevice(req.user))?._id,
       type,
       message: message.trim(),
       ...(safeLocation ? { location: safeLocation } : {}),
@@ -94,13 +96,13 @@ const getAlerts = async (req, res) => {
     );
 
     const alerts = await Alert.find({
-      user: req.user._id,
+      ...await alertQuery(req.user),
     })
       .sort({ triggeredAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit);
 
-    return res.json(alerts);
+    return res.json(alerts.map(alert => alertView(alert, req.user._id)));
   } catch (error) {
     console.error("GET ALERTS ERROR:", error);
     return res.status(500).json({
@@ -121,10 +123,10 @@ const markAlertRead = async (req, res) => {
     const alert = await Alert.findOneAndUpdate(
       {
         _id: req.params.alertId,
-        user: req.user._id,
+        ...await alertQuery(req.user),
       },
       {
-        $set: { isRead: true },
+        $addToSet: { readBy: req.user._id },
       },
       {
         new: true,
@@ -137,7 +139,7 @@ const markAlertRead = async (req, res) => {
       });
     }
 
-    return res.json(alert);
+    return res.json(alertView(alert, req.user._id));
   } catch (error) {
     console.error("MARK ALERT READ ERROR:", error);
     return res.status(500).json({

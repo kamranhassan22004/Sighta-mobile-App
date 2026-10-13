@@ -2,7 +2,8 @@ const mongoose = require("mongoose");
 const crypto = require("crypto");
 const Device = require("../models/Device");
 const User = require("../models/User");
-const { sendPushNotification } = require("../services/pushNotificationService");
+const { notifyDeviceGuardians } = require("../services/pushNotificationService");
+const { accessQuery, deviceView } = require("../services/deviceAccessService");
 
 // Generate a secure key for Raspberry Pi
 const generateDeviceKey = () => {
@@ -115,8 +116,7 @@ const getDeviceStatus = async (req, res) => {
     }
 
     const device = await Device.findOne({
-      owner: req.user._id,
-      $or: identifiers,
+      $and: [accessQuery(req.user._id), { $or: identifiers }],
     }).select("-apiKeyHash");
 
     if (!device) {
@@ -125,22 +125,7 @@ const getDeviceStatus = async (req, res) => {
       });
     }
 
-    const result = device.toObject();
-
-    // A device is online only if it has synced recently
-    const lastSyncTime = result.lastSyncedAt
-      ? new Date(result.lastSyncedAt).getTime()
-      : NaN;
-
-    const isRecent =
-      Number.isFinite(lastSyncTime) &&
-      Date.now() - lastSyncTime >= 0 &&
-      Date.now() - lastSyncTime <= 15000;
-
-    result.status =
-      result.status === "online" && isRecent
-        ? "online"
-        : "offline";
+    const result = deviceView(device);
 
     return res.json(result);
   } catch (error) {
@@ -220,30 +205,14 @@ const updateDevice = async (req, res) => {
       previousBattery >= 20;
 
     if (batteryJustBecameLow) {
-      const guardian = await User.findById(device.owner);
-
-      if (
-        guardian &&
-        guardian.notificationSettings?.lowBattery !== false &&
-        guardian.fcmToken
-      ) {
-        try {
-          await sendPushNotification({
-            pushToken: guardian.fcmToken,
-            title: "🔋 SIGHTA Low Battery",
-            body: `Your SIGHTA device battery is at ${batteryPercentage}%. Please charge it.`,
-            data: {
-              type: "lowBattery",
-              deviceId: device.deviceId,
-            },
-          });
-        } catch (error) {
-          console.error("LOW BATTERY PUSH ERROR:", error);
-        }
-      }
+      await notifyDeviceGuardians(device, "lowBattery", {
+        title: "\uD83D\uDD0B SIGHTA Low Battery",
+        body: `Your SIGHTA device battery is at ${batteryPercentage}%. Please charge it.`,
+        data: { type: "lowBattery", deviceId: device.deviceId },
+      });
     }
 
-    return res.json(updated);
+    return res.json(deviceView(updated));
   } catch (error) {
     console.error("UPDATE DEVICE ERROR:", error);
 

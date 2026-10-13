@@ -62,6 +62,33 @@ const sendPushNotification = async ({
   };
 };
 
-module.exports = {
-  sendPushNotification,
+// Re-read membership and preference immediately before each delivery.
+const notifyDeviceGuardians = async (device, preference, notification) => {
+  const { getGuardians } = require("./deviceAccessService");
+  const Device = require("../models/Device");
+  const User = require("../models/User");
+  const currentDevice = await Device.findById(device._id);
+  if (!currentDevice) return 0;
+  const guardians = await getGuardians(currentDevice);
+  const tokens = new Set();
+  let accepted = 0;
+  for (const candidate of guardians) {
+    try {
+      const authorized = await Device.exists({ _id: device._id,
+        $or: [{ owner: candidate._id }, { guardians: candidate._id }] });
+      if (!authorized) continue;
+      const guardian = await User.findById(candidate._id);
+      if (!guardian || guardian.notificationSettings?.[preference] === false ||
+          !isValidExpoPushToken(guardian.fcmToken) || tokens.has(guardian.fcmToken)) continue;
+      tokens.add(guardian.fcmToken);
+      const payload = typeof notification === "function" ? notification(guardian) : notification;
+      const result = await sendPushNotification({ ...payload, pushToken: guardian.fcmToken });
+      if (result.success) accepted++;
+    } catch (error) {
+      console.error("DEVICE PUSH DELIVERY FAILED");
+    }
+  }
+  return accepted;
 };
+
+module.exports = { sendPushNotification, notifyDeviceGuardians };

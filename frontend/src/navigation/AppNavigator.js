@@ -4,6 +4,7 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../theme/colors";
+import { useAuth } from "../context/AuthContext";
 
 import DashboardScreen from "../screens/DashboardScreen";
 import LiveTrackingScreen from "../screens/LiveTrackingScreen";
@@ -64,8 +65,11 @@ const iconMap = {
 };
 
 export default function AppNavigator() {
+  const { user } = useAuth();
+  const accountDeviceKey = `${user?._id}:${user?.device?._id || user?.device?.deviceId || user?.device || "none"}`;
   return (
     <Tab.Navigator
+      key={accountDeviceKey}
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarActiveTintColor: colors.primary,

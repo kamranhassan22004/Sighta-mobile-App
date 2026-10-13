@@ -8,6 +8,7 @@ const {
   sendPushNotification,
 } = require("../services/pushNotificationService");
 
+const { getGuardians } = require("../services/deviceAccessService");
 const router = express.Router();
 
 // Prevent duplicate alerts for the same disconnection
@@ -33,6 +34,16 @@ offlineAlertSchema.index(
 const OfflineAlert =
   mongoose.models.OfflineAlert ||
   mongoose.model("OfflineAlert", offlineAlertSchema);
+
+// Separate collection avoids changing the legacy owner-only unique index.
+const deliverySchema = new mongoose.Schema({
+  device: { type: mongoose.Schema.Types.ObjectId, required: true },
+  user: { type: mongoose.Schema.Types.ObjectId, required: true },
+  lastSync: { type: Date, required: true },
+}, { timestamps: true });
+deliverySchema.index({ device: 1, user: 1, lastSync: 1 }, { unique: true });
+const OfflineGuardianDelivery = mongoose.models.OfflineGuardianDelivery ||
+  mongoose.model("OfflineGuardianDelivery", deliverySchema);
 
 // GET /api/device-monitor/offline
 router.get("/offline", async (req, res) => {
@@ -70,50 +81,35 @@ router.get("/offline", async (req, res) => {
 
     for (const device of devices) {
       try {
-        const guardian = await User.findById(device.owner);
-
-        if (
-          !guardian ||
-          guardian.notificationSettings?.deviceOffline === false ||
-          !guardian.fcmToken
-        ) {
-          continue;
-        }
-
-        // Claim this disconnection only once
-        try {
-          await OfflineAlert.create({
-            device: device._id,
-            lastSync: device.lastSyncedAt,
-          });
-        } catch (error) {
-          if (error.code === 11000) {
-            continue;
+        const guardians = await getGuardians(device);
+        for (const candidate of guardians) {
+          let claim;
+          try {
+            const authorized = await Device.exists({ _id: device._id,
+              $or: [{ owner: candidate._id }, { guardians: candidate._id }] });
+            const guardian = await User.findById(candidate._id);
+            if (!authorized || !guardian || guardian.notificationSettings?.deviceOffline === false || !guardian.fcmToken) continue;
+            // An existing owner delivery remains deduplicated after upgrade.
+            if (String(guardian._id) === String(device.owner) && await OfflineAlert.exists({
+              device: device._id, lastSync: device.lastSyncedAt,
+            })) continue;
+            claim = { device: device._id, user: guardian._id, lastSync: device.lastSyncedAt };
+            try { await OfflineGuardianDelivery.create(claim); }
+            catch (error) { if (error.code === 11000) continue; throw error; }
+            const result = await sendPushNotification({
+              pushToken: guardian.fcmToken,
+              title: "\u26A0\uFE0F SIGHTA Device Offline",
+              body: "Your SIGHTA device has stopped syncing. Please check its connection.",
+              data: { type: "deviceOffline", deviceId: device.deviceId },
+            });
+            if (result?.success) notificationsSent++;
+            else await OfflineGuardianDelivery.deleteOne(claim);
+          } catch (error) {
+            if (claim) await OfflineGuardianDelivery.deleteOne(claim);
+            console.error("OFFLINE GUARDIAN DELIVERY FAILED");
           }
-
-          throw error;
         }
 
-        const result = await sendPushNotification({
-          pushToken: guardian.fcmToken,
-          title: "⚠️ SIGHTA Device Offline",
-          body:
-            "Your SIGHTA device has stopped syncing. Please check its connection.",
-          data: {
-            type: "deviceOffline",
-            deviceId: device.deviceId,
-          },
-        });
-
-        if (result?.success) {
-          notificationsSent++;
-        } else {
-          // Allow retry if push was not accepted
-          await OfflineAlert.deleteOne({
-            device: device._id,
-            lastSync: device.lastSyncedAt,
-          });
-        }
       } catch (error) {
         console.error(
           "OFFLINE NOTIFICATION ERROR:",

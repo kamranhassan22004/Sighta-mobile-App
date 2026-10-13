@@ -18,6 +18,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useAuth } from "../context/AuthContext";
 import { updateProfile } from "../services/authService";
 import Header from "../components/Header";
+import DeviceSharing from "../components/DeviceSharing";
 
 import {
   colors,
@@ -426,6 +427,10 @@ export default function ProfileScreen({ navigation }) {
         </Section>
 
         {/* Profile Menu */}
+        <Section title="Device Sharing">
+          <DeviceSharing styles={styles} />
+        </Section>
+
         <View style={styles.menu}>
           <MenuRow
             icon="notifications-outline"

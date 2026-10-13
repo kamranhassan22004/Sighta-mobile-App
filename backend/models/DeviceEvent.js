@@ -53,6 +53,8 @@ deviceEventSchema.index({
   occurredAt: -1,
 });
 
+deviceEventSchema.index({ device: 1, occurredAt: -1 });
+
 module.exports = mongoose.model(
   "DeviceEvent",
   deviceEventSchema

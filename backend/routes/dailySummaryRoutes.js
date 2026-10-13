@@ -11,6 +11,7 @@ const {
   sendPushNotification,
 } = require("../services/pushNotificationService");
 
+const { getAuthorizedDevice, recordQuery } = require("../services/deviceAccessService");
 const router = express.Router();
 
 // Pakistan time: UTC + 5
@@ -54,7 +55,7 @@ const DailySummaryLog =
   );
 
 // Count real GPS records only when schema supports it
-const getGPSCount = async (userId, deviceId, start, end) => {
+const getGPSCount = async (userId, device, start, end) => {
   const dateField = [
     "recordedAt",
     "timestamp",
@@ -67,14 +68,8 @@ const getGPSCount = async (userId, deviceId, start, end) => {
     [dateField]: { $gte: start, $lte: end },
   };
 
-  if (Location.schema.path("user")) {
-    query.user = userId;
-  } else if (Location.schema.path("device") && deviceId) {
-    query.device = deviceId;
-  } else {
-    // Never count another guardian's locations
-    return null;
-  }
+  if (!device) return 0;
+  Object.assign(query, recordQuery(device));
 
   return Location.countDocuments(query);
 };
@@ -108,24 +103,23 @@ router.get("/run", async (req, res) => {
 
     for (const guardian of guardians) {
       try {
-        const device = await Device.findOne({
-          owner: guardian._id,
-        });
+        const device = await getAuthorizedDevice(guardian);
+        if (!device) continue;
 
         const gpsCount = await getGPSCount(
           guardian._id,
-          device?._id,
+          device,
           start,
           end
         );
 
         const deviceEvents = await DeviceEvent.countDocuments({
-          user: guardian._id,
+          ...recordQuery(device),
           occurredAt: { $gte: start, $lte: end },
         });
 
         const sosAlerts = await Alert.countDocuments({
-          user: guardian._id,
+          ...recordQuery(device),
           type: "sos",
           triggeredAt: { $gte: start, $lte: end },
         });
@@ -158,8 +152,15 @@ router.get("/run", async (req, res) => {
         let accepted = false;
 
         try {
+          const authorized = await Device.exists({ _id: device._id,
+            $or: [{ owner: guardian._id }, { guardians: guardian._id }] });
+          const freshGuardian = await User.findById(guardian._id);
+          if (!authorized || freshGuardian?.notificationSettings?.dailySummary !== true || !freshGuardian?.fcmToken) {
+            await DailySummaryLog.deleteOne({ user: guardian._id, date });
+            continue;
+          }
           const result = await sendPushNotification({
-            pushToken: guardian.fcmToken,
+            pushToken: freshGuardian.fcmToken,
             title: "📍 SIGHTA Daily Summary",
             body: message,
             data: {
@@ -232,13 +233,11 @@ router.get("/activity", protect, async (req, res) => {
     const { start, end } = getDayRange(date);
     const userId = req.user._id;
 
-    const device = await Device.findOne({
-      owner: userId,
-    });
+    const device = await getAuthorizedDevice(req.user);
 
     const gpsUpdates = await getGPSCount(
       userId,
-      device?._id,
+      device,
       start,
       end
     );
@@ -261,14 +260,8 @@ router.get("/activity", protect, async (req, res) => {
 
       let canQuery = false;
 
-      if (Location.schema.path("user")) {
-        locationQuery.user = userId;
-        canQuery = true;
-      } else if (
-        Location.schema.path("device") &&
-        device
-      ) {
-        locationQuery.device = device._id;
+      if (device) {
+        Object.assign(locationQuery, recordQuery(device));
         canQuery = true;
       }
 
@@ -292,11 +285,11 @@ router.get("/activity", protect, async (req, res) => {
 
     const [deviceEvents, sosAlerts] = await Promise.all([
       DeviceEvent.countDocuments({
-        user: userId,
+        ...recordQuery(device),
         occurredAt: { $gte: start, $lte: end },
       }),
       Alert.countDocuments({
-        user: userId,
+        ...recordQuery(device),
         type: "sos",
         triggeredAt: { $gte: start, $lte: end },
       }),

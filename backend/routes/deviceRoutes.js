@@ -10,6 +10,11 @@
   } = require("../controllers/deviceController");
 
   const { protect } = require("../middleware/authMiddleware");
+  const { getSharing, inviteGuardian, acceptInvitation, revokeGuardian } = require("../controllers/deviceSharingController");
+  router.get("/sharing", protect, getSharing);
+  router.post("/sharing/:deviceId/invite", protect, inviteGuardian);
+  router.post("/sharing/:deviceId/accept", protect, acceptInvitation);
+  router.delete("/sharing/:deviceId/guardians/:guardianId", protect, revokeGuardian);
 
   // Register Raspberry Pi device
   router.post("/register", protect, registerDevice);

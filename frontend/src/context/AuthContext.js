@@ -5,10 +5,12 @@ import React, {
   useEffect,
   useContext,
   useRef,
+  useCallback,
 } from "react";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as authService from "../services/authService";
+import { changeSession, setSessionToken } from "../api/sessionState";
 
 export const AuthContext = createContext(null);
 
@@ -27,6 +29,27 @@ export const AuthProvider = ({ children }) => {
   const lastPushAttemptToken = useRef(null);
   const pushRegistrationPromise = useRef(null);
   const loggingOutRef = useRef(false);
+  const sessionVersion = useRef(0);
+  const currentUser = useRef(null);
+  const storageQueue = useRef(Promise.resolve());
+  const logoutPromise = useRef(null);
+  const refreshSequence = useRef(0);
+
+  // Serialize storage writes so a late profile cannot repopulate a cleared session.
+  const store = useCallback((version, operation) => {
+    const pending = storageQueue.current.catch(() => {}).then(async () => {
+      if (sessionVersion.current !== version) return;
+      await operation();
+    });
+    storageQueue.current = pending;
+    return pending;
+  }, []);
+
+  const publish = useCallback((value) => {
+    currentUser.current = value;
+    setSessionToken(value?.token || null);
+    setUser(value);
+  }, []);
 
   // Restore saved login session
   useEffect(() => {
@@ -42,6 +65,7 @@ export const AuthProvider = ({ children }) => {
     };
 
     const bootstrap = async () => {
+      const version = sessionVersion.current;
       try {
         updateProgress(
           5,
@@ -61,12 +85,6 @@ export const AuthProvider = ({ children }) => {
         if (storedUser && token) {
           const cachedUser = JSON.parse(storedUser);
 
-          if (active) {
-            setUser({
-              ...cachedUser,
-              token,
-            });
-          }
 
           updateProgress(
             55,
@@ -75,7 +93,7 @@ export const AuthProvider = ({ children }) => {
 
           try {
             const profile =
-              await authService.getProfile();
+              await authService.getProfile(token);
 
             updateProgress(
               85,
@@ -83,19 +101,18 @@ export const AuthProvider = ({ children }) => {
             );
 
             const updatedUser = {
-              ...cachedUser,
               ...profile,
               token,
             };
 
-            if (active) {
-              await AsyncStorage.setItem(
+            if (active && version === sessionVersion.current) {
+              await store(version, () => AsyncStorage.setItem(
                 "user",
                 JSON.stringify(updatedUser)
-              );
+              ));
 
-              if (active) {
-                setUser(updatedUser);
+              if (active && version === sessionVersion.current) {
+                publish(updatedUser);
               }
             }
 
@@ -109,6 +126,17 @@ export const AuthProvider = ({ children }) => {
               error?.message || error
             );
 
+            if (active && version === sessionVersion.current) {
+              if (error?.response?.status === 401 || error?.response?.status === 404 || cachedUser.token !== token) {
+                await store(version, () => AsyncStorage.multiRemove(["token", "user"]));
+                publish(null);
+              } else {
+                // Cached identity may be used offline; cached device availability is never trusted.
+                publish({ ...cachedUser, token, device: cachedUser.device && typeof cachedUser.device === "object"
+                  ? { ...cachedUser.device, status: "offline", connectivity: { ...cachedUser.device.connectivity, wifi: false } }
+                  : cachedUser.device || null });
+              }
+            }
             updateProgress(
               95,
               "Using your saved account..."
@@ -186,7 +214,9 @@ export const AuthProvider = ({ children }) => {
 
     pushRegistrationPromise.current =
       registerPushNotifications(
-        EXPO_PROJECT_ID
+        EXPO_PROJECT_ID,
+        token,
+        () => currentUser.current?.token === token && !loggingOutRef.current
       ).catch((error) => {
         console.log(
           "PUSH REGISTRATION ERROR:",
@@ -195,116 +225,87 @@ export const AuthProvider = ({ children }) => {
       });
   }, [user?.token]);
 
-  // Login
-  const login = async (email, password) => {
-    const data = await authService.login(
-      email,
-      password
-    );
-
-    await AsyncStorage.setItem(
-      "token",
-      data.token
-    );
-
-    await AsyncStorage.setItem(
-      "user",
-      JSON.stringify(data)
-    );
-
-    setUser(data);
-
-    return data;
-  };
-
-  // Register new account
-  const register = async (payload) => {
-    const data = await authService.register(
-      payload
-    );
-
-    await AsyncStorage.setItem(
-      "token",
-      data.token
-    );
-
-    await AsyncStorage.setItem(
-      "user",
-      JSON.stringify(data)
-    );
-
-    setUser(data);
-
-    return data;
-  };
-
-  // Logout and clear push token
-  const logout = async () => {
-    loggingOutRef.current = true;
-
-    try {
-      if (pushRegistrationPromise.current) {
-        await pushRegistrationPromise.current;
-      }
-
-      try {
-        await authService.updateProfile({
-          fcmToken: null,
-        });
-
-        console.log(
-          "Push token removal requested."
-        );
-      } catch (error) {
-        console.log(
-          "PUSH TOKEN REMOVAL ERROR:",
-          error?.message || error
-        );
-      }
-    } finally {
-      await AsyncStorage.multiRemove([
-        "token",
-        "user",
-      ]);
-
-      lastPushAttemptToken.current = null;
-      pushRegistrationPromise.current = null;
-
-      setUser(null);
-      loggingOutRef.current = false;
-    }
-  };
-
-  // Refresh user profile
-  const refreshProfile = async () => {
-    const profile =
-      await authService.getProfile();
-
-    const storedUser =
-      await AsyncStorage.getItem("user");
-
-    const token =
-      await AsyncStorage.getItem("token");
-
-    const cachedUser = storedUser
-      ? JSON.parse(storedUser)
-      : {};
-
-    const updatedUser = {
-      ...cachedUser,
-      ...profile,
-      token,
-    };
-
-    await AsyncStorage.setItem(
-      "user",
-      JSON.stringify(updatedUser)
-    );
-
-    setUser(updatedUser);
-
+  const authenticate = async (request) => {
+    if (logoutPromise.current) await logoutPromise.current;
+    const version = ++sessionVersion.current;
+    changeSession();
+    publish(null);
+    await store(version, () => AsyncStorage.multiRemove(["token", "user"]));
+    const data = await request();
+    const profile = await authService.getProfile(data.token);
+    if (sessionVersion.current !== version) throw new Error("Account session changed");
+    if (String(profile._id) !== String(data._id)) throw new Error("Account profile mismatch");
+    const updatedUser = { ...profile, token: data.token };
+    await store(version, () => AsyncStorage.multiSet([
+      ["token", data.token], ["user", JSON.stringify(updatedUser)],
+    ]));
+    if (sessionVersion.current !== version) throw new Error("Account session changed");
+    publish(updatedUser);
     return updatedUser;
   };
+
+  const login = (email, password) => authenticate(() => authService.login(email, password));
+  const register = (payload) => authenticate(() => authService.register(payload));
+
+  const logout = useCallback(() => {
+    if (logoutPromise.current) return logoutPromise.current;
+    const token = currentUser.current?.token;
+    const version = ++sessionVersion.current;
+    loggingOutRef.current = true;
+    changeSession();
+    publish(null);
+    const cleanup = (async () => {
+      try {
+        await store(version, () => AsyncStorage.multiRemove(["token", "user"]));
+        if (pushRegistrationPromise.current) await pushRegistrationPromise.current;
+        if (token) {
+          try { await authService.updateProfile({ fcmToken: null }, token); }
+          catch (error) { console.log("Push token cleanup could not complete."); }
+        }
+      } finally {
+        lastPushAttemptToken.current = null;
+        pushRegistrationPromise.current = null;
+        loggingOutRef.current = false;
+        logoutPromise.current = null;
+      }
+    })();
+    logoutPromise.current = cleanup;
+    return cleanup;
+  }, [publish, store]);
+
+  const refreshProfile = useCallback(async () => {
+    const account = currentUser.current;
+    const version = sessionVersion.current;
+    if (!account?.token || loggingOutRef.current) return null;
+    const sequence = ++refreshSequence.current;
+    const pending = (async () => {
+      let profile;
+      try { profile = await authService.getProfile(account.token); }
+      catch (error) {
+        if (version !== sessionVersion.current || sequence !== refreshSequence.current) return null;
+        throw error;
+      }
+      if (version !== sessionVersion.current || sequence !== refreshSequence.current) return null;
+      if (String(profile._id) !== String(account._id)) throw new Error("Account profile mismatch");
+      const updatedUser = { ...profile, token: account.token };
+      await store(version, () => AsyncStorage.setItem("user", JSON.stringify(updatedUser)));
+      if (version !== sessionVersion.current || sequence !== refreshSequence.current) return null;
+      if (JSON.stringify(currentUser.current) !== JSON.stringify(updatedUser)) publish(updatedUser);
+      return updatedUser;
+    })();
+    return pending;
+  }, [publish, store]);
+
+  // Existing device polling cadence also refreshes authorization while the app is open.
+  useEffect(() => {
+    if (!user?.token) return;
+    const timer = setInterval(() => {
+      refreshProfile().catch(error => {
+        if (error?.response?.status === 401) logout();
+      });
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [user?.token, refreshProfile, logout]);
 
   return (
     <AuthContext.Provider

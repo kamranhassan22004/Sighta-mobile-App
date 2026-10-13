@@ -1,5 +1,6 @@
 import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { sessionSnapshot } from "./sessionState";
 
 // IMPORTANT: Update this to your backend's address.
 // - Android emulator: use 10.0.2.2 instead of localhost
@@ -15,8 +16,13 @@ const api = axios.create({
 
 // Attach the JWT token to every request if we have one
 api.interceptors.request.use(async (config) => {
-  const token = await AsyncStorage.getItem("token");
-  if (token) {
+  const snapshot = sessionSnapshot();
+  config.sessionGeneration = snapshot.generation;
+  const token = snapshot.initialized ? snapshot.token : await AsyncStorage.getItem("token");
+  if (snapshot.generation !== sessionSnapshot().generation) {
+    throw new axios.CanceledError("Account session changed");
+  }
+  if (token && !config.headers.Authorization) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
@@ -24,8 +30,17 @@ api.interceptors.request.use(async (config) => {
 
 // Centralize error shape so screens don't each parse axios errors
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (response.config.sessionGeneration !== sessionSnapshot().generation) {
+      return Promise.reject(new axios.CanceledError("Account session changed"));
+    }
+    return response;
+  },
   (error) => {
+    if (error.config?.sessionGeneration !== undefined &&
+        error.config.sessionGeneration !== sessionSnapshot().generation) {
+      return Promise.reject(new axios.CanceledError("Account session changed"));
+    }
     const message =
       error.response?.data?.message || error.message || "Something went wrong";
     return Promise.reject({ ...error, message });

@@ -43,6 +43,8 @@ const liveLocationSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+liveLocationSchema.index({ device: 1 });
+
 module.exports = mongoose.model(
   "LiveLocation",
   liveLocationSchema

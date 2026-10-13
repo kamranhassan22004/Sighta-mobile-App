@@ -1,5 +1,6 @@
 
 const DeviceEvent = require("../models/DeviceEvent");
+const { getAuthorizedDevice, recordQuery } = require("../services/deviceAccessService");
 
 // GET /api/device-events/:userId
 // Fetch device activity history for logged-in guardian
@@ -23,7 +24,7 @@ const getDeviceEvents = async (req, res) => {
     );
 
     const events = await DeviceEvent.find({
-      user: req.user._id,
+      ...recordQuery(await getAuthorizedDevice(req.user)),
     })
       .sort({ occurredAt: -1 })
       .skip((page - 1) * limit)

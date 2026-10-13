@@ -2,6 +2,8 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const User = require("../models/User");
+const { sanitizePhone } = require("../utils/phone");
+const { getAuthorizedDevice, deviceView } = require("../services/deviceAccessService");
 const { sendResetCodeEmail } = require("../utils/sendEmail");
 
 const generateToken = (id) => {
@@ -15,7 +17,10 @@ const hashCode = (code) => crypto.createHash("sha256").update(code).digest("hex"
 // @route  POST /api/auth/register
 const registerUser = async (req, res) => {
   try {
-    const { name, email, password, dependentName, dependentRelationship } = req.body;
+    const { name, email, password, phone, dependentName, dependentRelationship } = req.body;
+    let cleanedPhone;
+    try { cleanedPhone = sanitizePhone(phone); }
+    catch (error) { return res.status(400).json({ message: error.message }); }
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: "Name, email and password are required" });
@@ -33,6 +38,7 @@ const registerUser = async (req, res) => {
       name,
       email: email.toLowerCase(),
       password: hashedPassword,
+      phone: cleanedPhone,
       dependent: {
         name: dependentName || "",
         relationship: dependentRelationship || "",
@@ -44,6 +50,7 @@ const registerUser = async (req, res) => {
       _id: user._id,
       name: user.name,
       email: user.email,
+      phone: user.phone || "",
       dependent: user.dependent,
       device: user.device || null,
       notificationSettings: user.notificationSettings,
@@ -79,6 +86,11 @@ const loginUser = async (req, res) => {
       name: user.name,
       email: user.email,
       token: generateToken(user._id),
+      phone: user.phone || "",
+      dependent: user.dependent,
+      emergencyContacts: user.emergencyContacts,
+      notificationSettings: user.notificationSettings,
+      device: deviceView(await getAuthorizedDevice(user)),
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
@@ -89,17 +101,15 @@ const loginUser = async (req, res) => {
 const getProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id)
-      .select("-password -resetCodeHash -resetCodeExpires -fcmToken")
-      .populate({
-        path: "device",
-        select: "-apiKeyHash",
-      });
+      .select("-password -resetCodeHash -resetCodeExpires -fcmToken");
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    return res.json(user);
+    const profile = user.toObject();
+    profile.device = deviceView(await getAuthorizedDevice(user));
+    return res.json(profile);
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -140,24 +150,8 @@ const updateProfile = async (req, res) => {
 
     // Update guardian phone number
     if (phone !== undefined) {
-      if (typeof phone !== "string") {
-        return res.status(400).json({
-          message: "Invalid phone number",
-        });
-      }
-
-      const cleanedPhone = phone.trim();
-
-      if (
-        cleanedPhone &&
-        !/^\+?[0-9\s()-]{7,20}$/.test(cleanedPhone)
-      ) {
-        return res.status(400).json({
-          message: "Enter a valid phone number",
-        });
-      }
-
-      user.phone = cleanedPhone;
+      try { user.phone = sanitizePhone(phone); }
+      catch (error) { return res.status(400).json({ message: error.message }); }
     }
 
     // Preserve existing functionality
@@ -189,6 +183,7 @@ const updateProfile = async (req, res) => {
         /^(ExpoPushToken|ExponentPushToken)\[[^\]]+\]$/.test(fcmToken)
       ) {
         // Save a valid Expo push token
+        await User.updateMany({ _id: { $ne: user._id }, fcmToken }, { $set: { fcmToken: null } });
         user.fcmToken = fcmToken;
       } else {
         return res.status(400).json({
@@ -205,7 +200,8 @@ const updateProfile = async (req, res) => {
       email: user.email,
       phone: user.phone || "",
       dependent: user.dependent,
-      device: user.device || null,
+      device: deviceView(await getAuthorizedDevice(user)),
+      emergencyContacts: user.emergencyContacts,
       notificationSettings: user.notificationSettings,
       token: generateToken(user._id),
     });

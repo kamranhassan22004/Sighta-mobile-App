@@ -17,6 +17,13 @@ const deviceSchema = new mongoose.Schema(
     },
 
     // Secure authentication for Raspberry Pi
+    guardians: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    invitations: [{
+      guardian: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+      status: { type: String, enum: ["pending", "accepted", "revoked"], default: "pending" },
+      expiresAt: { type: Date, required: true },
+    }],
+
     apiKeyHash: {
       type: String,
       select: false,
@@ -59,4 +66,6 @@ const deviceSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+deviceSchema.index({ owner: 1 });
+deviceSchema.index({ guardians: 1 });
 module.exports = mongoose.model("Device", deviceSchema);

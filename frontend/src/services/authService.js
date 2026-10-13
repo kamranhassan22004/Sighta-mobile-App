@@ -10,13 +10,13 @@ export const register = async (payload) => {
   return data;
 };
 
-export const getProfile = async () => {
-  const { data } = await api.get("/auth/profile");
+export const getProfile = async (token) => {
+  const { data } = await api.get("/auth/profile", token ? { headers: { Authorization: `Bearer ${token}` } } : {});
   return data;
 };
 
-export const updateProfile = async (payload) => {
-  const { data } = await api.put("/auth/profile", payload);
+export const updateProfile = async (payload, token) => {
+  const { data } = await api.put("/auth/profile", payload, token ? { headers: { Authorization: `Bearer ${token}` } } : {});
   return data;
 };
 

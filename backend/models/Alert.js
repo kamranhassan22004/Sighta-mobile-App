@@ -20,11 +20,13 @@ const alertSchema = new mongoose.Schema(
     },
 
     isRead: { type: Boolean, default: false },
+    readBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     triggeredAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );
 
 alertSchema.index({ user: 1, triggeredAt: -1 });
+alertSchema.index({ device: 1, triggeredAt: -1 });
 
 module.exports = mongoose.model("Alert", alertSchema);

@@ -7,7 +7,7 @@ const Alert = require("../models/Alert");
 const LiveLocation = require("../models/LiveLocation");
 
 const {
-  sendPushNotification,
+  notifyDeviceGuardians,
 } = require("../services/pushNotificationService");
 
 // POST /api/alerts/device-sos
@@ -76,9 +76,8 @@ const deviceSOS = async (req, res) => {
       "Your SIGHTA user";
 
     // Step 5: Fetch last-known GPS location
-    // Match both guardian and device for safety
+    // The physical device has one last-known GPS reading for all guardians.
     const latestLocation = await LiveLocation.findOne({
-      user: guardian._id,
       device: device._id,
     });
 
@@ -144,27 +143,19 @@ const deviceSOS = async (req, res) => {
 
     // Step 9: Send push notification
     let pushAccepted = false;
-
-    if (
-      guardian.notificationSettings?.sosAlerts !== false &&
-      guardian.fcmToken
-    ) {
-      try {
-        const result = await sendPushNotification({
-          pushToken: guardian.fcmToken,
-          title: "🚨 SIGHTA SOS ALERT",
-          body: alertMessage,
+    try {
+      const accepted = await notifyDeviceGuardians(device, "sosAlerts", (recipient) => {
+        const name = recipient.dependent?.name?.trim() || dependentName;
+        return {
+          title: "\uD83D\uDEA8 SIGHTA SOS ALERT",
+          body: safeLocation
+            ? `${name} has triggered an SOS alert. Last-known GPS location is available.`
+            : `${name} has triggered an SOS alert. GPS location is currently unavailable.`,
           data: notificationData,
-        });
-
-        pushAccepted = result.success;
-      } catch (pushError) {
-        console.error(
-          "SOS PUSH ERROR:",
-          pushError.message
-        );
-      }
-    }
+        };
+      });
+      pushAccepted = accepted > 0;
+    } catch (error) { console.error("SOS PUSH ERROR"); }
 
     // Alert stays saved even if push fails
     return res.status(201).json({

@@ -6,7 +6,7 @@ import * as Device from "expo-device";
 
 import * as authService from "./authService";
 
-export async function registerPushNotifications(projectId) {
+export async function registerPushNotifications(projectId, sessionToken, isCurrent = () => true) {
   try {
     if (!Device.isDevice) {
       console.log(
@@ -81,15 +81,12 @@ export async function registerPushNotifications(projectId) {
       );
     }
 
-    console.log(
-      "SIGHTA EXPO PUSH TOKEN:",
-      expoPushToken
-    );
+    if (!isCurrent()) return null;
 
     // Save token in guardian's MongoDB account
     await authService.updateProfile({
       fcmToken: expoPushToken,
-    });
+    }, sessionToken);
 
     console.log(
       "SIGHTA push token saved successfully."

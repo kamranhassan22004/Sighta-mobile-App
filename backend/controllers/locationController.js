@@ -4,6 +4,7 @@ const DeviceEvent = require("../models/DeviceEvent");
 const Location = require("../models/Location");
 const LiveLocation = require("../models/LiveLocation");
 const Device = require("../models/Device");
+const { getAuthorizedDevice, recordQuery } = require("../services/deviceAccessService");
 const { reverseGeocode } = require("../services/reverseGeocode");
 
 const pendingAddressUpdates = new Set();
@@ -67,7 +68,7 @@ const saveGPSLocation = async (
 ) => {
   const now = new Date();
 
-  // Update one live-location document per guardian
+  // Keep the existing single owner live document; guardians read it by device.
   const liveLocation = await LiveLocation.findOneAndUpdate(
     { user: device.owner },
     {
@@ -89,7 +90,7 @@ const saveGPSLocation = async (
 
   // Save a history point approximately every 60 seconds
   const lastHistory = await Location.findOne({
-    user: device.owner,
+    device: device._id,
   }).sort({ recordedAt: -1 });
 
   if (
@@ -292,9 +293,8 @@ const getCurrentLocation = async (req, res) => {
       });
     }
 
-    const liveLocation = await LiveLocation.findOne({
-      user: req.user._id,
-    });
+    const device = await getAuthorizedDevice(req.user);
+    const liveLocation = await LiveLocation.findOne(recordQuery(device));
 
     if (liveLocation) {
       return res.json(liveLocation);
@@ -302,7 +302,7 @@ const getCurrentLocation = async (req, res) => {
 
     // Fallback to previously saved location
     const lastLocation = await Location.findOne({
-      user: req.user._id,
+      ...recordQuery(device),
     }).sort({ recordedAt: -1 });
 
     if (!lastLocation) {
@@ -340,7 +340,7 @@ const getLocationHistory = async (req, res) => {
     );
 
     const history = await Location.find({
-      user: req.user._id,
+      ...recordQuery(await getAuthorizedDevice(req.user)),
     })
       .sort({ recordedAt: -1 })
       .skip((page - 1) * limit)
