@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   View,
   Text,
@@ -10,6 +10,8 @@ import {
   ScrollView,
   Alert,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import GoogleAuthButton from "../components/GoogleAuthButton";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../context/AuthContext";
 import { colors, spacing, radius, typography } from "../theme/colors";
@@ -23,19 +25,25 @@ export default function RegisterScreen({ navigation }) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
+  const insets = useSafeAreaInsets();
+  const requestLock = useRef(false);
 
   const handleRegister = async () => {
+    if (requestLock.current || googleBusy) return;
     if (!name.trim()) return Alert.alert("Missing name", "Please enter your full name.");
     if (!isValidEmail(email)) return Alert.alert("Invalid email", "Please enter a valid email address.");
     if (password.length < 6) return Alert.alert("Weak password", "Password must be at least 6 characters.");
     if (password !== confirmPassword) return Alert.alert("Passwords don't match", "Please re-check your password.");
 
+    requestLock.current = true;
     setLoading(true);
     try {
       await register({ name: name.trim(), email: email.trim(), password, phone: phone.trim() });
     } catch (error) {
       Alert.alert("Registration failed", error.message || "Please try again.");
     } finally {
+      requestLock.current = false;
       setLoading(false);
     }
   };
@@ -45,7 +53,7 @@ export default function RegisterScreen({ navigation }) {
       style={{ flex: 1, backgroundColor: colors.background }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]} keyboardShouldPersistTaps="handled">
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} hitSlop={10}>
           <Ionicons name="arrow-back" size={22} color={colors.primary} />
         </TouchableOpacity>
@@ -60,12 +68,14 @@ export default function RegisterScreen({ navigation }) {
         <Field icon="lock-closed-outline" label="Confirm Password" value={confirmPassword} onChangeText={setConfirmPassword} placeholder="Re-enter password" secureTextEntry />
 
         <TouchableOpacity
-          style={[styles.button, loading && { opacity: 0.7 }]}
+          style={[styles.button, (loading || googleBusy) && { opacity: 0.7 }]}
           onPress={handleRegister}
-          disabled={loading}
+          disabled={loading || googleBusy}
         >
           <Text style={styles.buttonText}>{loading ? "Creating Account…" : "Create Account"}</Text>
         </TouchableOpacity>
+
+        <GoogleAuthButton disabled={loading} onBusyChange={setGoogleBusy} />
 
         <TouchableOpacity style={styles.signinWrap} onPress={() => navigation.navigate("Login")}>
           <Text style={styles.signinText}>
@@ -112,11 +122,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     borderRadius: radius.lg,
     paddingVertical: 16,
+    minHeight: 56,
     alignItems: "center",
     marginTop: spacing.lg,
   },
   buttonText: { ...typography.labelLg, color: colors.onPrimary, fontSize: 16 },
   signinWrap: { marginTop: spacing.lg, marginBottom: spacing.lg },
-  signinText: { ...typography.bodyMd, color: colors.onSurfaceVariant },
+  signinText: { textAlign: "center", ...typography.bodyMd, color: colors.onSurfaceVariant },
   signinLink: { color: colors.primary, fontWeight: "700" },
 });

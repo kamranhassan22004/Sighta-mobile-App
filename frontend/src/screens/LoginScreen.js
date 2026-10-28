@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   View,
   Text,
@@ -9,7 +9,10 @@ import {
   Platform,
   ScrollView,
   Alert,
+  useWindowDimensions,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import GoogleAuthButton from "../components/GoogleAuthButton";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../context/AuthContext";
 import { colors, spacing, radius, typography } from "../theme/colors";
@@ -20,8 +23,13 @@ export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const requestLock = useRef(false);
 
   const handleLogin = async () => {
+    if (requestLock.current || googleBusy) return;
     if (!isValidEmail(email)) {
       return Alert.alert("Invalid email", "Please enter a valid email address.");
     }
@@ -29,6 +37,7 @@ export default function LoginScreen({ navigation }) {
       return Alert.alert("Missing password", "Please enter your password.");
     }
 
+    requestLock.current = true;
     setLoading(true);
     try {
       await login(email.trim(), password);
@@ -36,6 +45,7 @@ export default function LoginScreen({ navigation }) {
     } catch (error) {
       Alert.alert("Sign in failed", error.message || "Please check your credentials.");
     } finally {
+      requestLock.current = false;
       setLoading(false);
     }
   };
@@ -45,8 +55,8 @@ export default function LoginScreen({ navigation }) {
       style={{ flex: 1, backgroundColor: colors.background }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <View style={styles.card}>
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]} keyboardShouldPersistTaps="handled">
+        <View style={[styles.card, width < 360 && styles.compactCard]}>
           <View style={styles.logo}>
             <Ionicons name="shield-checkmark" size={30} color={colors.onPrimary} />
           </View>
@@ -87,13 +97,15 @@ export default function LoginScreen({ navigation }) {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.button, loading && { opacity: 0.7 }]}
+            style={[styles.button, (loading || googleBusy) && { opacity: 0.7 }]}
             onPress={handleLogin}
-            disabled={loading}
+            disabled={loading || googleBusy}
           >
             <Text style={styles.buttonText}>{loading ? "Signing In…" : "Sign In"}</Text>
             {!loading && <Ionicons name="arrow-forward" size={18} color={colors.onPrimary} style={{ marginLeft: 8 }} />}
           </TouchableOpacity>
+
+          <GoogleAuthButton disabled={loading} onBusyChange={setGoogleBusy} />
 
           <TouchableOpacity style={styles.signupWrap} onPress={() => navigation.navigate("Register")}>
             <Text style={styles.signupText}>
@@ -119,6 +131,7 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     elevation: 3,
   },
+  compactCard: { paddingHorizontal: spacing.sm },
   logo: {
     width: 64,
     height: 64,
@@ -159,11 +172,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     borderRadius: radius.lg,
     paddingVertical: 16,
+    minHeight: 56,
     alignItems: "center",
     justifyContent: "center",
   },
   buttonText: { ...typography.labelLg, color: colors.onPrimary, fontSize: 16 },
   signupWrap: { marginTop: spacing.lg },
-  signupText: { ...typography.bodyMd, color: colors.onSurfaceVariant },
+  signupText: { textAlign: "center", ...typography.bodyMd, color: colors.onSurfaceVariant },
   signupLink: { color: colors.primary, fontWeight: "700" },
 });

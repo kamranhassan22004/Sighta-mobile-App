@@ -8,7 +8,7 @@ import React, {
   useCallback,
 } from "react";
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import AsyncStorage from "../api/sessionStorage";
 import * as authService from "../services/authService";
 import { changeSession, setSessionToken } from "../api/sessionState";
 
@@ -246,6 +246,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = (email, password) => authenticate(() => authService.login(email, password));
   const register = (payload) => authenticate(() => authService.register(payload));
+  const loginWithGoogle = (idToken) => authenticate(() => authService.googleLogin(idToken));
 
   const logout = useCallback(() => {
     if (logoutPromise.current) return logoutPromise.current;
@@ -316,6 +317,7 @@ export const AuthProvider = ({ children }) => {
         loadingMessage,
         login,
         register,
+        loginWithGoogle,
         logout,
         refreshProfile,
       }}

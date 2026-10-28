@@ -80,7 +80,7 @@ const mount = async (saved = {}, configure = () => {}) => {
     module, exports: module.exports,
     require: name => {
       if (name === "react") return React;
-      if (name.includes("async-storage")) return asyncStorage;
+      if (name.includes("async-storage") || name.includes("sessionStorage")) return asyncStorage;
       if (name.includes("authService")) return services;
       if (name.includes("sessionState")) return sessions;
       if (name.includes("pushNotificationService")) return { registerPushNotifications: async () => null };
@@ -101,6 +101,23 @@ const mount = async (saved = {}, configure = () => {}) => {
   render(); await flush();
   return { get context() { return provider; }, storage, services, asyncStorage, calls, timers, cleanup() { effects.forEach(effect => effect?.cleanup?.()); } };
 };
+
+test("Google login reuses full-profile session persistence and logout", async () => {
+  const app = await mount({}, services => {
+    services.googleLogin = async token => {
+      assert.equal(token, "google-identity");
+      return { _id: "G", token: "token-G" };
+    };
+  });
+  await app.context.loginWithGoogle("google-identity");
+  await flush();
+  assert.equal(app.context.user._id, "G");
+  assert.equal(app.storage.get("token"), "token-G");
+  await app.context.logout();
+  await flush();
+  assert.equal(app.context.user, null);
+  assert.equal(app.storage.has("token"), false);
+});
 
 test("fresh login waits for the full profile before publishing context and storage", async () => {
   const app = await mount();

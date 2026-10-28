@@ -51,7 +51,9 @@
           "imageWidth": 300,
           "resizeMode": "contain"
         }
-      ]
+      ],
+      "expo-secure-store",
+      "@react-native-google-signin/google-signin"
     ],
     "extra": {
       "eas": {
