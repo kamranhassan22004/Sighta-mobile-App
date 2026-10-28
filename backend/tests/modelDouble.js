@@ -114,7 +114,8 @@ const install = Model => {
     const doc = new Model(payload);
     await doc.validate();
     const row = normalize(doc);
-    const duplicate = Model.schema.indexes().some(([fields, options]) => options.unique && rows.some(old =>
+    const duplicate = Model.schema.indexes().some(([fields, options]) => options.unique &&
+      !(options.sparse && Object.keys(fields).every(field => row[field] === undefined)) && rows.some(old =>
       Object.keys(fields).every(field => equal(old[field], row[field]))));
     if (duplicate || (Model.modelName === "Device" && rows.some(r => r.deviceId === row.deviceId))) {
       throw Object.assign(new Error("Duplicate"), { code: 11000 });

@@ -72,7 +72,7 @@ const loginUser = async (req, res) => {
     }
 
     const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) {
+    if (!user || !user.password) {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
